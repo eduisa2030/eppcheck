@@ -180,7 +180,7 @@ export default function Scan({ onBack, user }) {
       </div>
 
       {showNotifyAsk && (
-        <div className="fixed inset-0 bg-black/70 flex items-end justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/70 flex items-end justify-center z-[100] p-4">
           <div className="bg-[#15151F] rounded-3xl p-6 w-full max-w-sm border border-white/10">
             <p className="text-center font-semibold mb-1">Resultado registrado</p>
             <p className="text-center text-sm text-[#8A8A98] mb-5">¿Quieres enviar notificación al supervisor?</p>
