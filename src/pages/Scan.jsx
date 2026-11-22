@@ -69,8 +69,21 @@ export default function Scan({ onBack, user }) {
     setSaved(true)
   }
 
-  const handleReport = () => {
+  const handleReport = async () => {
+    const data = { 
+      user: operator, 
+      timestamp: new Date().toISOString(), 
+      results, 
+      details: results,
+      message: 'El operador considera que la detección puede ser incorrecta'
+    }
     saveLocal({ cumple: false, missing: ['REPORTE'], details: results, user: operator })
+    try {
+      await fetch('https://script.google.com/macros/s/AKfycbz3WNpFqyN9iO65f9ba9B9jqzE-wSVaW0bH9y7rWBckkS2PcCkjOOQb4rjN4fGIvb7pvQ/exec?action=notify', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      })
+    } catch (e) {}
     setReported(true)
   }
 
