@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 640" width="300" height="640">
+  <defs>
+    <linearGradient id="hat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE585"/>
+      <stop offset="0.4" stop-color="#FFC21A"/>
+      <stop offset="1" stop-color="#C99700"/>
+    </linearGradient>
+    <linearGradient id="hatb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E0B21A"/>
+      <stop offset="1" stop-color="#A07A00"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D7B48C"/>
+      <stop offset="1" stop-color="#B28960"/>
+    </linearGradient>
+    <linearGradient id="skind" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#C4A07A"/>
+      <stop offset="1" stop-color="#9A734C"/>
+    </linearGradient>
+    <linearGradient id="vest" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFB400"/>
+      <stop offset="1" stop-color="#D67E00"/>
+    </linearGradient>
+    <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3E4656"/>
+      <stop offset="1" stop-color="#2A3140"/>
+    </linearGradient>
+    <linearGradient id="pants" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3C4656"/>
+      <stop offset="1" stop-color="#262D38"/>
+    </linearGradient>
+    <linearGradient id="boot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3C332C"/>
+      <stop offset="1" stop-color="#1A1613"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B7D6EE" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#4E7A9C" stop-opacity="0.42"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A3A44"/>
+      <stop offset="1" stop-color="#1A1A22"/>
+    </linearGradient>
+  </defs>
+
+  <ellipse cx="150" cy="628" rx="86" ry="11" fill="#000" opacity="0.38"/>
+
+  <path d="M108 8 C108 3 114 1 124 1 L176 1 C186 1 192 3 192 8 L198 76 L102 76 Z" fill="#2C2C36" stroke="#D7B056" stroke-width="3"/>
+  <rect x="102" y="72" width="96" height="9" rx="2" fill="#E0B25A"/>
+  <rect x="116" y="12" width="68" height="44" rx="5" fill="#0E0E14"/>
+  <rect x="124" y="20" width="52" height="7" rx="2" fill="#3A3A46"/>
+  <rect x="124" y="32" width="52" height="7" rx="2" fill="#3A3A46"/>
+
+  <path d="M100 358 L94 522 L142 522 L144 358 Z" fill="url(#pants)"/>
+  <path d="M200 358 L206 522 L158 522 L156 358 Z" fill="url(#pants)"/>
+  <rect x="100" y="354" width="100" height="12" rx="2" fill="#1E2430"/>
+
+  <path d="M92 516 L92 576 L60 576 L54 594 L54 626 L144 626 L144 516 Z" fill="url(#boot)"/>
+  <path d="M208 516 L208 576 L240 576 L246 594 L246 626 L156 626 L156 516 Z" fill="url(#boot)"/>
+  <rect x="54" y="602" width="90" height="7" fill="#FFC21A"/>
+  <rect x="156" y="602" width="90" height="7" fill="#FFC21A"/>
+
+  <path d="M86 210 C58 228 44 275 40 325 L34 405 C32 424 58 428 66 410 L70 336 C74 286 90 238 112 218 Z" fill="url(#shirt)"/>
+  <path d="M214 210 C242 228 256 275 260 325 L266 405 C268 424 242 428 234 410 L230 336 C226 286 210 238 188 218 Z" fill="url(#shirt)"/>
+
+  <ellipse cx="48" cy="432" rx="17" ry="21" fill="url(#skin)"/>
+  <ellipse cx="38" cy="422" rx="7" ry="11" fill="url(#skind)" transform="rotate(-28 38 422)"/>
+  <rect x="39" y="446" width="6.2" height="22" rx="3.1" fill="url(#skin)"/>
+  <rect x="46.2" y="448" width="6.4" height="24" rx="3.2" fill="url(#skin)"/>
+  <rect x="53.4" y="447" width="6.2" height="22" rx="3.1" fill="url(#skin)"/>
+  <rect x="60.2" y="445" width="5.6" height="18" rx="2.8" fill="url(#skin)"/>
+
+  <ellipse cx="252" cy="432" rx="17" ry="21" fill="url(#skin)"/>
+  <ellipse cx="262" cy="422" rx="7" ry="11" fill="url(#skind)" transform="rotate(28 262 422)"/>
+  <rect x="254.8" y="446" width="6.2" height="22" rx="3.1" fill="url(#skin)"/>
+  <rect x="247.4" y="448" width="6.4" height="24" rx="3.2" fill="url(#skin)"/>
+  <rect x="240.4" y="447" width="6.2" height="22" rx="3.1" fill="url(#skin)"/>
+  <rect x="234.2" y="445" width="5.6" height="18" rx="2.8" fill="url(#skin)"/>
+
+  <path d="M96 198 C70 208 66 236 82 255 L90 358 L210 358 L218 255 C234 236 230 208 204 198 L172 214 L150 202 L128 214 Z" fill="url(#shirt)"/>
+
+  <path d="M114 206 L94 250 L100 362 C150 382 200 362 200 362 L206 250 L186 206 L166 226 L150 214 L134 226 Z" fill="url(#vest)"/>
+  <rect x="108" y="286" width="84" height="11" rx="2.5" fill="#EEF1F7" opacity="0.95"/>
+  <rect x="110" y="324" width="80" height="9" rx="2.5" fill="#EEF1F7" opacity="0.88"/>
+  <rect x="146" y="226" width="8" height="140" rx="2" fill="#EEF1F7" opacity="0.55"/>
+
+  <rect x="137" y="176" width="26" height="32" rx="9" fill="url(#skin)"/>
+  <ellipse cx="107" cy="132" rx="7" ry="11" fill="url(#skind)"/>
+  <ellipse cx="193" cy="132" rx="7" ry="11" fill="url(#skind)"/>
+  <ellipse cx="150" cy="130" rx="42" ry="48" fill="url(#skin)"/>
+  <path d="M112 118 C118 96 130 90 150 90 C170 90 182 96 188 118 C180 108 164 104 150 104 C136 104 120 108 112 118Z" fill="#3A2A22" opacity="0.38"/>
+  <path d="M136 150 C140 156 160 156 164 150" fill="none" stroke="#A07A54" stroke-width="1.7" stroke-linecap="round" opacity="0.75"/>
+  <path d="M150 136 L150 146" stroke="#A07A54" stroke-width="1.4" stroke-linecap="round" opacity="0.45"/>
+
+  <rect x="112" y="126" width="30" height="18" rx="9" fill="url(#lens)" stroke="#1B1B20" stroke-width="2.4"/>
+  <rect x="158" y="126" width="30" height="18" rx="9" fill="url(#lens)" stroke="#1B1B20" stroke-width="2.4"/>
+  <rect x="140" y="132" width="20" height="3.4" rx="1.2" fill="#1B1B20"/>
+  <path d="M112 134 L102 130" stroke="#1B1B20" stroke-width="2.3" stroke-linecap="round"/>
+  <path d="M188 134 L198 130" stroke="#1B1B20" stroke-width="2.3" stroke-linecap="round"/>
+
+  <path d="M80 112 C80 48 108 26 150 24 C192 26 220 48 220 112 L230 118 C230 118 228 134 214 132 L206 114 C200 138 176 154 150 154 C124 154 100 138 94 114 L86 132 C72 134 70 118 70 118 Z" fill="url(#hat)"/>
+  <ellipse cx="150" cy="114" rx="86" ry="13" fill="url(#hatb)"/>
+  <path d="M92 110 C102 86 122 78 150 78 C178 78 198 86 208 110" fill="none" stroke="#FFF3C0" stroke-width="3.2" opacity="0.4"/>
+  <rect x="144" y="30" width="12" height="22" rx="3" fill="#E0B10E"/>
+  <rect x="136" y="26" width="28" height="9" rx="3.5" fill="#B88900"/>
+</svg>
