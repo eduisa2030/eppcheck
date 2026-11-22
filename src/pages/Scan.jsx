@@ -10,6 +10,7 @@ export default function Scan({ onBack, user }) {
   const [frozen, setFrozen] = useState(false)
   const [saved, setSaved] = useState(false)
   const [reported, setReported] = useState(false)
+  const [showNotifyAsk, setShowNotifyAsk] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const prevCumple = useRef(null)
   const operator = user?.name || user?.user || 'Operador'
@@ -67,6 +68,25 @@ export default function Scan({ onBack, user }) {
     saveLocal(data)
     await saveRemote(data)
     setSaved(true)
+    setShowNotifyAsk(true)
+  }
+
+  const sendNotification = async () => {
+    const data = {
+      user: operator,
+      timestamp: new Date().toISOString(),
+      results,
+      details: results,
+      cumple,
+      missing: problemas
+    }
+    try {
+      await fetch('https://script.google.com/macros/s/AKfycbz3WNpFqyN9iO65f9ba9B9jqzE-wSVaW0bH9y7rWBckkS2PcCkjOOQb4rjN4fGIvb7pvQ/exec?action=notify', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      })
+    } catch (e) {}
+    setShowNotifyAsk(false)
   }
 
   const handleReport = async () => {
@@ -158,6 +178,23 @@ export default function Scan({ onBack, user }) {
           </button>
         )}
       </div>
+
+      {showNotifyAsk && (
+        <div className="fixed inset-0 bg-black/70 flex items-end justify-center z-50 p-4">
+          <div className="bg-[#15151F] rounded-3xl p-6 w-full max-w-sm border border-white/10">
+            <p className="text-center font-semibold mb-1">Resultado registrado</p>
+            <p className="text-center text-sm text-[#8A8A98] mb-5">¿Quieres enviar notificación al supervisor?</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowNotifyAsk(false)} className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm">
+                Cerrar
+              </button>
+              <button onClick={sendNotification} className="flex-1 py-3 rounded-xl bg-[#FFC21A] text-black font-semibold text-sm">
+                Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
