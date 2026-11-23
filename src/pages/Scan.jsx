@@ -5,6 +5,8 @@ import { vibrate, playBeep } from '../lib/feedback'
 import { ITEM_CLASSES, ITEMS } from '../lib/models'
 import { hasModel } from '../lib/config'
 import { complianceFromResults, snapshotResults, startDetection } from '../lib/detect'
+import { useCamera } from '../lib/useCamera'
+import CameraSwitchButton from '../components/CameraSwitchButton'
 
 export default function Scan({ onBack, user }) {
   const videoRef = useRef(null)
@@ -14,11 +16,11 @@ export default function Scan({ onBack, user }) {
   const [saved, setSaved] = useState(false)
   const [reported, setReported] = useState(false)
   const [showNotifyAsk, setShowNotifyAsk] = useState(false)
-  const [cameraError, setCameraError] = useState('')
   const [modelError, setModelError] = useState('')
   const [modelMessage, setModelMessage] = useState('Cargando modelos de detección…')
   const prevCumple = useRef(null)
   const operator = user?.name || user?.user || 'Operador'
+  const { mirrored, canSwitch, switching, error: cameraError, switchCamera } = useCamera(videoRef)
   const { cumple, missing: problemas, analyzing } = complianceFromResults(results)
   const criticos = problemas.filter(i => i === 'casco' || i === 'chaleco')
   const pending = analyzing || Boolean(cameraError) || Boolean(modelError)
@@ -27,10 +29,6 @@ export default function Scan({ onBack, user }) {
     return startDetection({
       videoRef,
       onResults: setResults,
-      onCameraError: (message) => {
-        setCameraError(message)
-        setModelMessage('')
-      },
       onModelError: setModelError,
       onMessage: setModelMessage,
       isFrozen: () => frozenRef.current,
@@ -106,11 +104,12 @@ export default function Scan({ onBack, user }) {
   return (
     <div className="min-h-screen bg-[#0A0A0F] text-white flex flex-col">
       <div className="relative mx-5 mt-5 rounded-3xl overflow-hidden bg-black" style={{height:'36vh'}}>
-        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+        <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${mirrored ? '-scale-x-100' : ''}`} />
         <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 backdrop-blur px-2.5 py-1 rounded-full text-[11px]">
           <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" /> EN VIVO
         </div>
         <button onClick={onBack} className="absolute top-3 right-3 w-8 h-8 bg-black/50 backdrop-blur rounded-full flex items-center justify-center">✕</button>
+        {canSwitch && <CameraSwitchButton onClick={switchCamera} disabled={switching} />}
         {cameraError && (
           <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-6 text-center text-sm">
             {cameraError}
