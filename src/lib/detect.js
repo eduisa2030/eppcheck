@@ -10,13 +10,17 @@ let loadPromise = null
  * Casco y chaleco: "Bien puesto", "mal puesto" / "Mal puesto ",
  * "sin poner " / "Sin poner " (mayúsculas y espacios distintos).
  * "puesto" a secas significa "bien puesto".
- * Lentes: "LENTES BIEN", "LENTES MAL" y "NADA" (NADA es "sin poner").
+ * Lentes (modelo actual): "LENTES" es bien/puesto y "NO PUESTO" es sin.
+ * "NO PUESTO" contiene el texto "puesto", así que se resuelve antes
+ * de esa búsqueda. Lentes anteriores ("LENTES BIEN", "LENTES MAL", "NADA")
+ * siguen valiendo: NADA es "sin poner".
  */
 export function mapLabel(label) {
   const n = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  if (n.includes('no puesto')) return 'sin'
   if (n.includes('mal')) return 'mal'
   if (n.includes('sin') || n.includes('nada')) return 'sin'
-  if (n.includes('bien') || n.includes('puesto')) return 'bien'
+  if (n === 'lentes' || n.includes('bien') || n.includes('puesto')) return 'bien'
   return 'sin'
 }
 
