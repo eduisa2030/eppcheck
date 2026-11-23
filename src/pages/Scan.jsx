@@ -3,65 +3,57 @@ import { saveScan as saveLocal } from '../lib/storage'
 import { saveScan as saveRemote } from '../lib/api'
 import { vibrate, playBeep } from '../lib/feedback'
 import { ITEM_CLASSES, ITEMS } from '../lib/models'
+import { hasModel } from '../lib/config'
+import { complianceFromResults, snapshotResults, startDetection } from '../lib/detect'
 
 export default function Scan({ onBack, user }) {
   const videoRef = useRef(null)
+  const frozenRef = useRef(false)
   const [results, setResults] = useState({})
   const [frozen, setFrozen] = useState(false)
   const [saved, setSaved] = useState(false)
   const [reported, setReported] = useState(false)
   const [showNotifyAsk, setShowNotifyAsk] = useState(false)
   const [cameraError, setCameraError] = useState('')
+  const [modelError, setModelError] = useState('')
+  const [modelMessage, setModelMessage] = useState('Cargando modelos de detección…')
   const prevCumple = useRef(null)
   const operator = user?.name || user?.user || 'Operador'
-
-  useEffect(() => {
-    let stream
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
-      .then(s => {
-        stream = s
-        if (videoRef.current) videoRef.current.srcObject = s
-      })
-      .catch(() => setCameraError('No se pudo acceder a la cámara. Revisa los permisos.'))
-
-    const interval = setInterval(() => {
-      if (frozen) return
-      const mock = {}
-      ITEMS.forEach(item => {
-        const r = Math.random()
-        mock[item] = {
-          status: r > 0.52 ? 'bien' : r > 0.28 ? 'mal' : 'sin',
-          conf: +(0.76 + Math.random() * 0.2).toFixed(2)
-        }
-      })
-      setResults(mock)
-    }, 1400)
-
-    return () => {
-      clearInterval(interval)
-      stream?.getTracks().forEach(t => t.stop())
-    }
-  }, [frozen])
-
-  useEffect(() => {
-    const cumpleNow = ITEMS.every(i => results[i]?.status === 'bien')
-    if (prevCumple.current !== null && prevCumple.current !== cumpleNow && Object.keys(results).length && !frozen) {
-      vibrate(cumpleNow ? 40 : [30, 40, 30])
-      playBeep(cumpleNow)
-    }
-    prevCumple.current = cumpleNow
-  }, [results, frozen])
-
-  const cumple = ITEMS.every(i => results[i]?.status === 'bien')
-  const problemas = ITEMS.filter(i => results[i] && results[i].status !== 'bien')
+  const { cumple, missing: problemas, analyzing } = complianceFromResults(results)
   const criticos = problemas.filter(i => i === 'casco' || i === 'chaleco')
+  const pending = analyzing || Boolean(cameraError) || Boolean(modelError)
+
+  useEffect(() => {
+    return startDetection({
+      videoRef,
+      onResults: setResults,
+      onCameraError: (message) => {
+        setCameraError(message)
+        setModelMessage('')
+      },
+      onModelError: setModelError,
+      onMessage: setModelMessage,
+      isFrozen: () => frozenRef.current,
+    })
+  }, [])
+
+  useEffect(() => {
+    if (prevCumple.current !== null && prevCumple.current !== cumple && !analyzing && !frozen) {
+      vibrate(cumple ? 40 : [30, 40, 30])
+      playBeep(cumple)
+    }
+    prevCumple.current = cumple
+  }, [cumple, analyzing, frozen])
 
   const confirmResult = async () => {
+    if (pending) return
+    frozenRef.current = true
     setFrozen(true)
+    const details = snapshotResults(results)
     const data = {
       cumple,
       missing: problemas,
-      details: results,
+      details,
       user: operator,
       timestamp: new Date().toISOString()
     }
@@ -72,11 +64,12 @@ export default function Scan({ onBack, user }) {
   }
 
   const sendNotification = async () => {
+    const details = snapshotResults(results)
     const data = {
       user: operator,
       timestamp: new Date().toISOString(),
-      results,
-      details: results,
+      results: details,
+      details,
       cumple,
       missing: problemas
     }
@@ -90,14 +83,15 @@ export default function Scan({ onBack, user }) {
   }
 
   const handleReport = async () => {
+    const details = snapshotResults(results)
     const data = { 
       user: operator, 
       timestamp: new Date().toISOString(), 
-      results, 
-      details: results,
+      results: details, 
+      details,
       message: 'El operador considera que la detección puede ser incorrecta'
     }
-    saveLocal({ cumple: false, missing: ['REPORTE'], details: results, user: operator })
+    saveLocal({ cumple: false, missing: ['REPORTE'], details, user: operator })
     try {
       await fetch('https://script.google.com/macros/s/AKfycbz3WNpFqyN9iO65f9ba9B9jqzE-wSVaW0bH9y7rWBckkS2PcCkjOOQb4rjN4fGIvb7pvQ/exec?action=notify', {
         method: 'POST',
@@ -126,12 +120,12 @@ export default function Scan({ onBack, user }) {
 
       {/* Resultado principal */}
       <div className="px-5 mt-4">
-        <div className={`rounded-2xl py-4 text-center ${cumple ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-red-500/15 border border-red-500/30'}`}>
-          <p className={`text-lg font-bold ${cumple ? 'text-emerald-400' : 'text-red-400'}`}>
-            {cumple ? 'AUTORIZADO PARA CHECAR' : 'NO AUTORIZADO'}
+        <div className={`rounded-2xl py-4 text-center ${pending ? 'bg-white/5 border border-white/10' : cumple ? 'bg-emerald-500/15 border border-emerald-500/30' : 'bg-red-500/15 border border-red-500/30'}`}>
+          <p className={`text-lg font-bold ${pending ? 'text-[#C8C8D0]' : cumple ? 'text-emerald-400' : 'text-red-400'}`}>
+            {cameraError ? 'CÁMARA NO DISPONIBLE' : modelError ? 'MODELOS NO DISPONIBLES' : pending ? 'ANALIZANDO' : cumple ? 'AUTORIZADO PARA CHECAR' : 'NO AUTORIZADO'}
           </p>
           <p className="text-xs mt-1 text-[#C8C8D0]">
-            {cumple ? 'EPP completo' : 'Completa tu equipo antes de checar'}
+            {cameraError || modelError || (pending ? (modelMessage || 'Cargando modelos de detección…') : cumple ? 'EPP completo' : 'Completa tu equipo antes de checar')}
           </p>
         </div>
         {criticos.length > 0 && (
@@ -144,8 +138,27 @@ export default function Scan({ onBack, user }) {
         <p className="text-[10px] tracking-widest text-[#6E6E7C] mb-3">DETALLE · {operator}</p>
         <div className="space-y-2.5">
           {ITEMS.map(item => {
+            if (!hasModel(item)) {
+              return (
+                <div key={item} className="flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-white/10 text-[#8A8A98]">–</div>
+                  <span className="capitalize flex-1 text-sm">{item}</span>
+                  <span className="text-xs text-[#C8C8D0]">Sin modelo aún</span>
+                  <span className="text-[11px] w-8 text-right text-[#8A8A98]">—</span>
+                </div>
+              )
+            }
             const r = results[item]
-            if (!r) return null
+            if (!r) {
+              return (
+                <div key={item} className="flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-white/10 text-[#8A8A98]">…</div>
+                  <span className="capitalize flex-1 text-sm">{item}</span>
+                  <span className="text-xs text-[#C8C8D0]">Cargando…</span>
+                  <span className="text-[11px] w-8 text-right text-[#8A8A98]">—</span>
+                </div>
+              )
+            }
             const label = ITEM_CLASSES[item]?.[r.status] || r.status
             return (
               <div key={item} className="flex items-center gap-3">
@@ -164,7 +177,7 @@ export default function Scan({ onBack, user }) {
       {/* Acciones */}
       <div className="px-5 pt-4 pb-8 flex gap-2">
         {!frozen ? (
-          <button onClick={confirmResult} className="flex-1 bg-gradient-to-b from-[#FFE07A] to-[#FFC21A] text-black font-semibold py-3.5 rounded-xl text-sm">
+          <button onClick={confirmResult} disabled={pending} className="flex-1 bg-gradient-to-b from-[#FFE07A] to-[#FFC21A] text-black font-semibold py-3.5 rounded-xl text-sm disabled:opacity-50">
             Confirmar resultado
           </button>
         ) : (
@@ -172,7 +185,7 @@ export default function Scan({ onBack, user }) {
             Registrado ✓
           </div>
         )}
-        {!cumple && !frozen && (
+        {!pending && !cumple && !frozen && (
           <button onClick={handleReport} className="px-5 bg-white/5 text-white text-sm rounded-xl border border-white/10">
             {reported ? 'Enviado' : 'Reportar'}
           </button>
