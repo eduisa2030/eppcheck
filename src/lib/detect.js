@@ -90,13 +90,10 @@ export function modeledItems() {
 /** Cumplimiento solo con los elementos que tienen modelo. */
 export function complianceFromResults(results) {
   const tracked = modeledItems()
-  const analyzing = tracked.some(id => {
-    const status = results?.[id]?.status
-    return status !== 'bien' && status !== 'mal' && status !== 'sin'
-  })
+  const analyzing = tracked.some(id => !results?.[id]?.status)
   const missing = tracked.filter(id => {
     const status = results?.[id]?.status
-    return status === 'mal' || status === 'sin'
+    return status && status !== 'bien'
   })
   return {
     analyzing,
@@ -144,43 +141,37 @@ async function predictProbs(model, video) {
  * La cámara la maneja useCamera: al cambiar de lente solo se reemplaza
  * srcObject, este intervalo sigue siendo el único.
  */
-export function startDetection({ videoRef, onResults, onModelError, onMessage, isFrozen }) {
+export function startDetection({ videoRef, onResults, onFrame, onModelError, onMessage, isFrozen, activeItems }) {
   let timer = null
   let stopped = false
   let busy = false
   let warned = false
   const states = {}
   const smooth = SMOOTHING
-
-  const emit = () => {
-    const out = {}
-    for (const id of modeledItems()) {
-      const state = states[id]
-      if (!state?.status) continue
-      out[id] = {
-        status: state.status,
-        conf: +state.conf.toFixed(2),
-      }
-    }
-    onResults(out)
-  }
+  const listener = onFrame || onResults
 
   const tick = async () => {
-    if (stopped || isFrozen() || busy) return
+    if (stopped || isFrozen?.() || busy) return
     const video = videoRef?.current
     if (!video || !video.srcObject || video.readyState < 2 || !video.videoWidth) return
+    const ids = (activeItems ? activeItems() : modeledItems()).filter(id => modelCache[id])
+    if (!ids.length) return
     busy = true
     try {
       const now = Date.now()
-      for (const id of modeledItems()) {
-        const model = modelCache[id]
-        if (!model) continue
+      const out = {}
+      for (const id of ids) {
         if (!states[id]) states[id] = { history: [], status: null, conf: 0 }
-        const probs = await predictProbs(model, video)
-        if (stopped || isFrozen()) return
+        const probs = await predictProbs(modelCache[id], video)
+        if (stopped || isFrozen?.()) return
         applySmoothing(states[id], probs, now, smooth)
+        if (!states[id].status) continue
+        out[id] = {
+          status: states[id].status,
+          conf: +states[id].conf.toFixed(2),
+        }
       }
-      if (!stopped && !isFrozen()) emit()
+      if (!stopped && !isFrozen?.() && listener && Object.keys(out).length) listener(out)
     } catch (err) {
       if (!warned) {
         console.warn('Error al predecir EPP', err)
@@ -206,8 +197,15 @@ export function startDetection({ videoRef, onResults, onModelError, onMessage, i
     timer = setInterval(tick, smooth.loopMs)
   })()
 
-  return function cleanup() {
+  function cleanup() {
     stopped = true
     if (timer) clearInterval(timer)
+  }
+
+  return {
+    stop: cleanup,
+    resetItem(id) {
+      delete states[id]
+    },
   }
 }
