@@ -8,7 +8,7 @@
  */
 export const MODELS = {
   casco: 'https://teachablemachine.withgoogle.com/models/CipT7kvYx/',
-  lentes: '',
+  lentes: 'https://teachablemachine.withgoogle.com/models/JpOoTGgap/',
   chaleco: 'https://teachablemachine.withgoogle.com/models/Em6vEGT1I/',
   guantes: '',
 }

@@ -7,14 +7,15 @@ let loadPromise = null
 
 /**
  * Normaliza las etiquetas de metadata.json a bien | mal | sin.
- * Los modelos publican "Bien puesto", "mal puesto" / "Mal puesto "
- * y "sin poner " / "Sin poner " (mayúsculas y espacios distintos).
+ * Casco y chaleco: "Bien puesto", "mal puesto" / "Mal puesto ",
+ * "sin poner " / "Sin poner " (mayúsculas y espacios distintos).
  * "puesto" a secas significa "bien puesto".
+ * Lentes: "LENTES BIEN", "LENTES MAL" y "NADA" (NADA es "sin poner").
  */
 export function mapLabel(label) {
   const n = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ')
   if (n.includes('mal')) return 'mal'
-  if (n.includes('sin')) return 'sin'
+  if (n.includes('sin') || n.includes('nada')) return 'sin'
   if (n.includes('bien') || n.includes('puesto')) return 'bien'
   return 'sin'
 }
