@@ -1,11 +1,12 @@
 import { ITEMS } from './models'
-import { SMOOTHING } from './config'
+import { CLASS_BIAS, SMOOTHING } from './config'
 import { activeModelIds, getModel, hasActiveModel, preloadModels } from './modelCache'
 
 
 /**
  * Normaliza las etiquetas de metadata.json a bien | mal | sin.
- * Casco: "Bien puesto", "mal puesto", "sin poner " (mayúsculas y espacios distintos).
+ * Casco (metadata): "Bien puesto", "mal puesto", "sin poner ".
+ * "sin poner" contiene "sin" y se evalúa antes que "puesto", así que es sin.
  * Chaleco: "Bien puesto", "Mal puesto", "Sin poner " (solo "Sin poner " lleva espacio final).
  * "puesto" a secas significa "bien puesto".
  * Lentes (modelo actual): "LENTES" es bien/puesto y "NO PUESTO" es sin.
@@ -29,7 +30,7 @@ function mean(values) {
   return sum / values.length
 }
 
-export function probsFromPredictions(predictions) {
+export function rawProbsFromPredictions(predictions) {
   const probs = { bien: 0, mal: 0, sin: 0 }
   for (const pred of predictions || []) {
     const key = mapLabel(pred.className)
@@ -39,12 +40,29 @@ export function probsFromPredictions(predictions) {
   return probs
 }
 
+/** El casco a veces puntúa "mal puesto" cuando no hay casco. Si sin está cerca, gana sin. */
+export function preferSin(probs, bias = CLASS_BIAS) {
+  const bien = probs.bien || 0
+  const mal = probs.mal || 0
+  const sin = probs.sin || 0
+  const topIsMal = mal >= bien && mal >= sin
+  if (topIsMal && sin >= bias.sinOverMal && bien < bias.bienMaxWhenPreferSin) {
+    return { bien, mal: 0, sin: Math.max(sin, mal) }
+  }
+  return { bien, mal, sin }
+}
+
+export function probsFromPredictions(predictions, bias = CLASS_BIAS) {
+  return preferSin(rawProbsFromPredictions(predictions), bias)
+}
+
 /**
  * Ventana móvil + histéresis.
  * Entra a "bien" (puesto) solo si el promedio de p(bien) >= 0.75
  * y sale solo si ese promedio baja a <= 0.40.
  */
 export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
+  if (state.firstT == null) state.firstT = now
   state.history.push({
     t: now,
     bien: probs.bien,
@@ -53,6 +71,13 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
   })
   const cutoff = now - smooth.windowMs
   state.history = state.history.filter(sample => sample.t >= cutoff)
+
+  // Los primeros cuadros, antes de llenar la ventana, no fijan ni muestran estado.
+  if (now - state.firstT < smooth.windowMs) {
+    state.status = null
+    state.conf = 0
+    return state
+  }
 
   const avgBien = mean(state.history.map(sample => sample.bien))
   const avgMal = mean(state.history.map(sample => sample.mal))

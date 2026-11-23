@@ -8,6 +8,11 @@ export function revokePrompt(id) {
   return `Vuelve a ponerte el ${id}`
 }
 
+export function armScan(state, now) {
+  if (!state || state.clockStarted || state.phase === 'done' || state.phase === 'timeout') return state
+  return { ...state, clockStarted: true, startedAt: now, stepStartedAt: now }
+}
+
 export function initialScan(items, now) {
   return {
     phase: items.length ? 'step' : 'done',

@@ -5,7 +5,7 @@ import { vibrate, playBeep } from '../lib/feedback'
 import { ITEM_CLASSES, ITEMS } from '../lib/models'
 import { activeModelIds, hasActiveModel, subscribeModelProgress } from '../lib/modelCache'
 import { complianceFromResults, modeledItems, snapshotResults, startDetection } from '../lib/detect'
-import { activeScanItems, initialScan, reduceScan, stepPrompt } from '../lib/scanFlow'
+import { activeScanItems, armScan, initialScan, reduceScan, stepPrompt } from '../lib/scanFlow'
 import { useCamera } from '../lib/useCamera'
 import CameraSwitchButton from '../components/CameraSwitchButton'
 
@@ -53,6 +53,15 @@ export default function Scan({ onBack, user }) {
   useEffect(() => {
     cameraReadyRef.current = cameraReady
   }, [cameraReady])
+
+  useEffect(() => {
+    if (!modelProgress.ready || !cameraReady || cameraError || modelError) return
+    const current = flowRef.current
+    if (!current || current.clockStarted || current.phase === 'done' || current.phase === 'timeout') return
+    const armed = armScan(current, Date.now())
+    flowRef.current = armed
+    setFlow(armed)
+  }, [modelProgress.ready, cameraReady, cameraError, modelError])
 
   useEffect(() => {
     const session = startDetection({
@@ -162,6 +171,13 @@ export default function Scan({ onBack, user }) {
   }
 
   const badge = s => s === 'bien' ? 'bg-emerald-500' : s === 'mal' ? 'bg-amber-500' : s === 'no_detectado' ? 'bg-white/10' : 'bg-red-500'
+  const phaseLabel = phase => ({
+    descargando: 'descargando',
+    memoria: 'descargado',
+    calentando: 'calentando',
+    listo: 'listo',
+    cache: 'en caché',
+  })[phase] || phase
 
   let headline = 'ESCANEO'
   let subtitle = currentId ? stepPrompt(currentId) : ''
@@ -221,6 +237,16 @@ export default function Scan({ onBack, user }) {
         <div className={`rounded-2xl py-4 px-4 text-center ${toneClass}`}>
           <p className={`text-lg font-bold ${titleClass}`}>{headline}</p>
           <p className="text-xs mt-1 text-[#C8C8D0]">{subtitle}</p>
+          {loadingModels && Object.keys(modelProgress.models || {}).length > 0 && (
+            <ul className="mt-3 space-y-1 text-left text-[11px] text-[#C8C8D0]">
+              {Object.entries(modelProgress.models).map(([id, item]) => (
+                <li key={id} className="flex justify-between gap-3 capitalize">
+                  <span>{id}</span>
+                  <span>{phaseLabel(item.phase)}{item.source === 'idb' ? ' · caché' : ''}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         {finished && criticos.length > 0 && (
           <p className="text-center text-xs text-red-400 mt-2 font-medium">Falta crítico: {criticos.join(', ')}</p>
