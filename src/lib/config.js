@@ -9,7 +9,7 @@
 export const MODELS = {
   casco: 'https://teachablemachine.withgoogle.com/models/CipT7kvYx/',
   lentes: 'https://teachablemachine.withgoogle.com/models/JpOoTGgap/',
-  chaleco: 'https://teachablemachine.withgoogle.com/models/Em6vEGT1I/',
+  chaleco: 'https://teachablemachine.withgoogle.com/models/Lmhs4iwPb/',
   guantes: '',
 }
 

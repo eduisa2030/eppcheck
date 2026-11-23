@@ -7,8 +7,8 @@ let loadPromise = null
 
 /**
  * Normaliza las etiquetas de metadata.json a bien | mal | sin.
- * Casco y chaleco: "Bien puesto", "mal puesto" / "Mal puesto ",
- * "sin poner " / "Sin poner " (mayúsculas y espacios distintos).
+ * Casco: "Bien puesto", "mal puesto", "sin poner " (mayúsculas y espacios distintos).
+ * Chaleco: "Bien puesto", "Mal puesto", "Sin poner " (solo "Sin poner " lleva espacio final).
  * "puesto" a secas significa "bien puesto".
  * Lentes (modelo actual): "LENTES" es bien/puesto y "NO PUESTO" es sin.
  * "NO PUESTO" contiene el texto "puesto", así que se resuelve antes
