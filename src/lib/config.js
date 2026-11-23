@@ -22,6 +22,15 @@ export const SMOOTHING = {
   malSinMargin: 0.15,
 }
 
+// Duración de cada fase del escaneo guiado.
+export const SCAN = {
+  latchMs: 1000,
+  stepTimeoutMs: 10000,
+  verifyMs: 2000,
+  scanTimeoutMs: 30000,
+  sinConfidence: 0.75,
+}
+
 export function hasModel(id) {
   return typeof MODELS[id] === 'string' && MODELS[id].trim().length > 0
 }
