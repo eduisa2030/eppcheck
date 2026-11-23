@@ -23,7 +23,7 @@ export async function saveScan(data) {
 export async function getModelUrls() {
   try {
     const url = BASE + '?action=getModels'
-    const res = await fetch(url)
+    const res = await fetch(url, { signal: AbortSignal.timeout(2500) })
     const data = await res.json()
     return data.models || {}
   } catch {

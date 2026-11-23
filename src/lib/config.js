@@ -22,6 +22,12 @@ export const SMOOTHING = {
   malSinMargin: 0.15,
 }
 
+// Si el modelo dice "mal" pero "sin" está cerca y "bien" es bajo, se reporta sin.
+export const CLASS_BIAS = {
+  sinOverMal: 0.35,
+  bienMaxWhenPreferSin: 0.3,
+}
+
 // Duración de cada fase del escaneo guiado.
 export const SCAN = {
   latchMs: 1000,
