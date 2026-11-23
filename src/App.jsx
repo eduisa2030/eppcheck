@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { preloadModels } from './lib/modelCache'
 import Login from './pages/Login'
 import Home from './pages/Home'
 import Scan from './pages/Scan'
@@ -12,6 +13,10 @@ import Settings from './pages/Settings'
 export default function App() {
   const [user, setUser] = useState(null)
   const [page, setPage] = useState('home')
+
+  useEffect(() => {
+    preloadModels().catch(err => console.warn('No se pudieron precargar los modelos', err))
+  }, [])
 
   if (!user) return <Login onLogin={setUser} />
 

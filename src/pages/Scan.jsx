@@ -3,7 +3,7 @@ import { saveScan as saveLocal } from '../lib/storage'
 import { saveScan as saveRemote } from '../lib/api'
 import { vibrate, playBeep } from '../lib/feedback'
 import { ITEM_CLASSES, ITEMS } from '../lib/models'
-import { hasModel } from '../lib/config'
+import { activeModelIds, hasActiveModel, subscribeModelProgress } from '../lib/modelCache'
 import { complianceFromResults, modeledItems, snapshotResults, startDetection } from '../lib/detect'
 import { activeScanItems, initialScan, reduceScan, stepPrompt } from '../lib/scanFlow'
 import { useCamera } from '../lib/useCamera'
@@ -20,9 +20,11 @@ export default function Scan({ onBack, user }) {
   const [reported, setReported] = useState(false)
   const [showNotifyAsk, setShowNotifyAsk] = useState(false)
   const [modelError, setModelError] = useState('')
-  const [modelMessage, setModelMessage] = useState('Cargando modelos de detección…')
+  const [modelProgress, setModelProgress] = useState({ loaded: 0, total: 0, ready: false })
   const operator = user?.name || user?.user || 'Operador'
-  const { mirrored, canSwitch, switching, error: cameraError, switchCamera } = useCamera(videoRef)
+  const { mirrored, canSwitch, switching, error: cameraError, ready: cameraReady, switchCamera } = useCamera(videoRef)
+  const modelsReadyRef = useRef(false)
+  const cameraReadyRef = useRef(false)
 
   const restart = () => {
     const next = initialScan(modeledItems(), Date.now())
@@ -36,17 +38,33 @@ export default function Scan({ onBack, user }) {
     setShowNotifyAsk(false)
   }
 
+  useEffect(() => subscribeModelProgress(progress => {
+    modelsReadyRef.current = progress.ready
+    setModelProgress(progress)
+    if (!progress.ready || flowRef.current?.clockStarted) return
+    const items = activeModelIds()
+    const current = flowRef.current
+    if (!current || current.items.join() === items.join()) return
+    const next = initialScan(items, Date.now())
+    flowRef.current = next
+    setFlow(next)
+  }), [])
+
+  useEffect(() => {
+    cameraReadyRef.current = cameraReady
+  }, [cameraReady])
+
   useEffect(() => {
     const session = startDetection({
       videoRef,
       onModelError: setModelError,
-      onMessage: setModelMessage,
       isFrozen: () => {
         const phase = flowRef.current?.phase
         return phase === 'done' || phase === 'timeout'
       },
       activeItems: () => activeScanItems(flowRef.current),
       onFrame: (predictions) => {
+        if (!modelsReadyRef.current || !cameraReadyRef.current) return
         const { state, resetIds } = reduceScan(flowRef.current, { predictions, now: Date.now() })
         resetIds.forEach(id => session.resetItem(id))
         flowRef.current = state
@@ -105,7 +123,8 @@ export default function Scan({ onBack, user }) {
   const problemas = judged?.missing ?? []
   const criticos = problemas.filter(i => i === 'casco' || i === 'chaleco')
   const currentId = flow.items[flow.index]
-  const loadingModels = Boolean(modelMessage) && !flow.clockStarted && flow.phase === 'step'
+  const scanArmed = modelProgress.ready && cameraReady && !cameraError && !modelError
+  const loadingModels = !scanArmed && !cameraError && !modelError && !finished && !timedOut
 
   const sendNotification = async () => {
     const payload = savedPayload.current
@@ -161,8 +180,12 @@ export default function Scan({ onBack, user }) {
     subtitle = cumple ? 'EPP completo' : 'Completa tu equipo antes de checar'
     tone = cumple ? 'ok' : 'bad'
   } else if (loadingModels) {
-    headline = 'ANALIZANDO'
-    subtitle = modelMessage
+    headline = 'CARGANDO'
+    subtitle = !modelProgress.ready
+      ? (modelProgress.total
+        ? `Cargando modelos… ${modelProgress.loaded}/${modelProgress.total}`
+        : 'Cargando modelos…')
+      : 'Preparando cámara…'
   } else if (flow.phase === 'verify') {
     headline = 'VERIFICANDO'
     subtitle = flow.notice
@@ -208,7 +231,7 @@ export default function Scan({ onBack, user }) {
         <p className="text-[10px] tracking-widest text-[#6E6E7C] mb-3">LISTA · {operator}</p>
         <div className="space-y-2.5">
           {ITEMS.map(item => {
-            if (!hasModel(item)) {
+            if (!hasActiveModel(item)) {
               return (
                 <div key={item} className="flex items-center gap-3">
                   <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-white/10 text-[#8A8A98]">–</div>

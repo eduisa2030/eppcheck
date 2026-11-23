@@ -1,9 +1,7 @@
 import { ITEMS } from './models'
-import { MODELS, SMOOTHING, hasModel } from './config'
-import { loadModel } from './tm'
+import { SMOOTHING } from './config'
+import { activeModelIds, getModel, hasActiveModel, preloadModels } from './modelCache'
 
-const modelCache = {}
-let loadPromise = null
 
 /**
  * Normaliza las etiquetas de metadata.json a bien | mal | sin.
@@ -84,7 +82,7 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
 }
 
 export function modeledItems() {
-  return ITEMS.filter(hasModel)
+  return activeModelIds()
 }
 
 /** Cumplimiento solo con los elementos que tienen modelo. */
@@ -105,30 +103,11 @@ export function complianceFromResults(results) {
 export function snapshotResults(results) {
   const details = { ...results }
   for (const id of ITEMS) {
-    if (!hasModel(id)) {
+    if (!hasActiveModel(id)) {
       details[id] = { status: 'sin_modelo', conf: null, label: 'Sin modelo aún' }
     }
   }
   return details
-}
-
-function modelUrl(id) {
-  return (MODELS[id] || '').trim()
-}
-
-function loadModels() {
-  if (loadPromise) return loadPromise
-  loadPromise = (async () => {
-    for (const id of modeledItems()) {
-      if (modelCache[id]) continue
-      modelCache[id] = await loadModel(modelUrl(id))
-    }
-    return modelCache
-  })().catch(err => {
-    loadPromise = null
-    throw err
-  })
-  return loadPromise
 }
 
 async function predictProbs(model, video) {
@@ -154,7 +133,7 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, onM
     if (stopped || isFrozen?.() || busy) return
     const video = videoRef?.current
     if (!video || !video.srcObject || video.readyState < 2 || !video.videoWidth) return
-    const ids = (activeItems ? activeItems() : modeledItems()).filter(id => modelCache[id])
+    const ids = (activeItems ? activeItems() : modeledItems()).filter(id => getModel(id))
     if (!ids.length) return
     busy = true
     try {
@@ -162,7 +141,7 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, onM
       const out = {}
       for (const id of ids) {
         if (!states[id]) states[id] = { history: [], status: null, conf: 0 }
-        const probs = await predictProbs(modelCache[id], video)
+        const probs = await predictProbs(getModel(id), video)
         if (stopped || isFrozen?.()) return
         applySmoothing(states[id], probs, now, smooth)
         if (!states[id].status) continue
@@ -184,9 +163,8 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, onM
 
   ;(async () => {
     try {
-      if (!stopped) onMessage('Cargando modelos de detección…')
-      await loadModels()
-      if (!stopped) onMessage('')
+      await preloadModels()
+      if (!stopped) onMessage?.('')
     } catch (err) {
       console.error(err)
       if (!stopped) onModelError('No se pudieron cargar los modelos de detección.')
