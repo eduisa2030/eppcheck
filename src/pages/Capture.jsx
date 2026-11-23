@@ -1,27 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useCamera } from '../lib/useCamera'
+import CameraSwitchButton from '../components/CameraSwitchButton'
 
 export default function Capture({ onBack }) {
   const videoRef = useRef(null)
-  const [stream, setStream] = useState(null)
+  const { mirrored, canSwitch, switching, error, switchCamera } = useCamera(videoRef)
   const [label, setLabel] = useState('completo')
   const [missing, setMissing] = useState([])
   const [saved, setSaved] = useState(false)
   const [preview, setPreview] = useState(null)
-
-  useEffect(() => {
-    startCamera()
-    return () => stream?.getTracks().forEach(t => t.stop())
-  }, [])
-
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
-      setStream(mediaStream)
-      if (videoRef.current) videoRef.current.srcObject = mediaStream
-    } catch (err) {
-      console.error(err)
-    }
-  }
 
   const takePhoto = () => {
     const video = videoRef.current
@@ -29,7 +16,12 @@ export default function Capture({ onBack }) {
     const canvas = document.createElement('canvas')
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
-    canvas.getContext('2d').drawImage(video, 0, 0)
+    const ctx = canvas.getContext('2d')
+    if (mirrored) {
+      ctx.translate(canvas.width, 0)
+      ctx.scale(-1, 1)
+    }
+    ctx.drawImage(video, 0, 0)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
     setPreview(dataUrl)
     setSaved(true)
@@ -50,7 +42,15 @@ export default function Capture({ onBack }) {
         <div className="w-10" />
       </div>
 
-      <video ref={videoRef} autoPlay playsInline muted className="w-full h-[55vh] object-cover" />
+      <div className="relative">
+        <video ref={videoRef} autoPlay playsInline muted className={`w-full h-[55vh] object-cover ${mirrored ? '-scale-x-100' : ''}`} />
+        {canSwitch && <CameraSwitchButton onClick={switchCamera} disabled={switching} />}
+        {error && (
+          <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-6 text-center text-sm text-white">
+            {error}
+          </div>
+        )}
+      </div>
 
       <div className="p-5 space-y-4">
         <div>

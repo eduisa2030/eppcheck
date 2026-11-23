@@ -140,11 +140,11 @@ async function predictProbs(model, video) {
 }
 
 /**
- * Abre la cámara, carga los modelos y predice cada ~200 ms.
- * Devuelve la función de limpieza del efecto.
+ * Carga los modelos y predice cada ~200 ms sobre el video ya abierto.
+ * La cámara la maneja useCamera: al cambiar de lente solo se reemplaza
+ * srcObject, este intervalo sigue siendo el único.
  */
-export function startDetection({ videoRef, onResults, onCameraError, onModelError, onMessage, isFrozen }) {
-  let stream = null
+export function startDetection({ videoRef, onResults, onModelError, onMessage, isFrozen }) {
   let timer = null
   let stopped = false
   let busy = false
@@ -168,7 +168,7 @@ export function startDetection({ videoRef, onResults, onCameraError, onModelErro
   const tick = async () => {
     if (stopped || isFrozen() || busy) return
     const video = videoRef?.current
-    if (!video || video.readyState < 2 || !video.videoWidth) return
+    if (!video || !video.srcObject || video.readyState < 2 || !video.videoWidth) return
     busy = true
     try {
       const now = Date.now()
@@ -193,25 +193,6 @@ export function startDetection({ videoRef, onResults, onCameraError, onModelErro
 
   ;(async () => {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' },
-        audio: false,
-      })
-      if (stopped) {
-        stream.getTracks().forEach(track => track.stop())
-        return
-      }
-      const video = videoRef?.current
-      if (video) {
-        video.srcObject = stream
-        video.play?.().catch(() => {})
-      }
-    } catch {
-      if (!stopped) onCameraError('No se pudo acceder a la cámara. Revisa los permisos.')
-      return
-    }
-
-    try {
       if (!stopped) onMessage('Cargando modelos de detección…')
       await loadModels()
       if (!stopped) onMessage('')
@@ -228,6 +209,5 @@ export function startDetection({ videoRef, onResults, onCameraError, onModelErro
   return function cleanup() {
     stopped = true
     if (timer) clearInterval(timer)
-    if (stream) stream.getTracks().forEach(track => track.stop())
   }
 }
