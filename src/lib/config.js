@@ -27,7 +27,7 @@ export const SCAN = {
   latchMs: 1000,
   stepTimeoutMs: 10000,
   verifyMs: 2000,
-  scanTimeoutMs: 30000,
+  scanTimeoutMs: 60000,
   sinConfidence: 0.75,
 }
 

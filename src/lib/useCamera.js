@@ -8,13 +8,6 @@ import {
   videoInputs,
 } from './camera'
 
-function bindStream(video, stream) {
-  if (!video) return
-  video.srcObject = stream
-  const play = video.play?.()
-  if (play?.catch) play.catch(() => {})
-}
-
 /**
  * Una sola sesión de cámara para el video. Cambiar de lente detiene
  * los tracks actuales y vuelve a pedir getUserMedia, sin abrir otra sesión.
@@ -24,6 +17,7 @@ export function useCamera(videoRef) {
   const [canSwitch, setCanSwitch] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [error, setError] = useState('')
+  const [ready, setReady] = useState(false)
   const streamRef = useRef(null)
   const deviceIdRef = useRef(null)
   const facingRef = useRef(facing)
@@ -36,7 +30,16 @@ export function useCamera(videoRef) {
     facingRef.current = opened.facing
     setFacing(opened.facing)
     saveFacingPreference(opened.facing)
-    bindStream(videoRef.current, opened.stream)
+    const video = videoRef.current
+    if (!video) return
+    video.srcObject = opened.stream
+    const play = video.play?.()
+    if (play?.catch) play.catch(() => {})
+    const markReady = () => {
+      if (aliveRef.current) setReady(true)
+    }
+    if (video.readyState >= 2) markReady()
+    else video.addEventListener('loadeddata', markReady, { once: true })
   }, [videoRef])
 
   useEffect(() => {
@@ -115,6 +118,7 @@ export function useCamera(videoRef) {
     canSwitch,
     switching,
     error,
+    ready,
     switchCamera,
   }
 }
