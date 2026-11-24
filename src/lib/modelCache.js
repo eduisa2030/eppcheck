@@ -4,10 +4,10 @@ import { getModelUrls } from './api'
 import { loadTM } from './tm'
 
 const memory = new Map()
-const inflight = new Map()
 const prefetched = new Map()
 let bootPromise = null
 let preloadPromise = null
+let engineCompileOnly = false
 let resolved = null
 let startedAt = 0
 let progress = { loaded: 0, total: 0, ready: false, models: {} }
@@ -91,6 +91,22 @@ async function bootTf() {
         console.warn('WebGL no disponible, se usa el backend por defecto', err)
       }
       await tf.ready()
+      const flags = { webglPack: false, compileOnly: false, parallelShader: false }
+      try {
+        tf.env().set('WEBGL_PACK', true)
+        flags.webglPack = tf.env().getBool('WEBGL_PACK')
+      } catch {}
+      try {
+        tf.env().set('ENGINE_COMPILE_ONLY', true)
+        flags.compileOnly = tf.env().getBool('ENGINE_COMPILE_ONLY') === true
+        tf.env().set('ENGINE_COMPILE_ONLY', false)
+      } catch {}
+      try {
+        const gl = tf.backend()?.gpgpu?.gl || tf.backend()?.getGPGPUContext?.()?.gl
+        flags.parallelShader = Boolean(gl?.getExtension?.('KHR_parallel_shader_compile'))
+      } catch {}
+      engineCompileOnly = flags.compileOnly
+      console.info('[epp-model]', JSON.stringify({ phase: 'tf', flags }))
       return tf
     })().catch(err => {
       bootPromise = null
@@ -117,13 +133,30 @@ function prefetch(url) {
   return prefetched.get(url)
 }
 
+function sharedFetch(url) {
+  const bag = typeof window !== 'undefined' ? window.__eppFiles : null
+  if (bag?.has(url)) return bag.get(url)
+  const controller = new AbortController()
+  window.__eppAbort?.set(url, controller)
+  const pending = fetch(url, { signal: controller.signal }).catch(err => {
+    if (err?.name === 'AbortError') return null
+    throw err
+  })
+  if (bag) bag.set(url, pending)
+  return pending
+}
+
+function abortUrl(url) {
+  window.__eppAbort?.get(url)?.abort()
+}
+
 async function fetchBundle(url) {
   const modelJsonUrl = url + 'model.json'
   const [modelRes, metaRes] = await Promise.all([
-    fetch(modelJsonUrl),
-    fetch(url + 'metadata.json'),
+    sharedFetch(modelJsonUrl),
+    sharedFetch(url + 'metadata.json'),
   ])
-  if (!modelRes.ok || !metaRes.ok) throw new Error(`No se pudo descargar ${url}`)
+  if (!modelRes?.ok || !metaRes?.ok) throw new Error(`No se pudo descargar ${url}`)
   const modelJSON = await modelRes.json()
   const metadata = await metaRes.json()
   const specs = []
@@ -131,8 +164,9 @@ async function fetchBundle(url) {
   for (const group of modelJSON.weightsManifest || []) {
     const buffers = await Promise.all((group.paths || []).map(async (path) => {
       const weightUrl = new URL(path, modelJsonUrl).href
-      const response = await fetch(weightUrl)
-      if (!response.ok) throw new Error(`No se pudieron leer los pesos de ${url}`)
+      rememberWeight(url, weightUrl)
+      const response = await sharedFetch(weightUrl)
+      if (!response?.ok) throw new Error(`No se pudieron leer los pesos de ${url}`)
       return response.arrayBuffer()
     }))
     specs.push(...(group.weights || []))
@@ -160,16 +194,6 @@ async function layersFromBundle(tf, bundle) {
   return tf.loadLayersModel(handler)
 }
 
-async function fromIndexedDb(tf, tm, id, url) {
-  const savedUrl = localStorage.getItem(storageKey(id, 'url'))
-  const name = localStorage.getItem(storageKey(id, 'idb'))
-  const metaRaw = localStorage.getItem(storageKey(id, 'meta'))
-  if (savedUrl !== url || !name || !metaRaw) return null
-  const metadata = JSON.parse(metaRaw)
-  const layers = await tf.loadLayersModel(name)
-  return { model: new tm.CustomMobileNet(layers, metadata), layers, metadata }
-}
-
 async function persist(tf, id, url, layers, metadata) {
   const name = `indexeddb://eppcheck-${id}-${hashUrl(url)}`
   const previous = localStorage.getItem(storageKey(id, 'idb'))
@@ -181,42 +205,6 @@ async function persist(tf, id, url, layers, metadata) {
   localStorage.setItem(storageKey(id, 'url'), url)
   localStorage.setItem(storageKey(id, 'meta'), JSON.stringify(metadata))
   console.info('[epp-model]', JSON.stringify({ id, phase: 'guardado', url }))
-}
-
-async function downloadOne(tf, tm, id, url) {
-  if (memory.has(url)) return { id, url, model: memory.get(url), layers: null, metadata: null, source: 'memory' }
-  if (inflight.has(url)) return inflight.get(url)
-  const job = (async () => {
-    mark(id, 'descargando', { url })
-    try {
-      const cached = await fromIndexedDb(tf, tm, id, url)
-      if (cached) {
-        memory.set(url, cached.model)
-        mark(id, 'memoria', { url, source: 'idb' })
-        return { ...cached, id, url, source: 'idb' }
-      }
-    } catch (err) {
-      console.warn('Caché local inválida, se descarga el modelo', id, err)
-    }
-    const bundle = await prefetch(url)
-    mark(id, 'memoria', { url, source: 'network' })
-    let layers
-    try {
-      layers = await layersFromBundle(tf, bundle)
-    } catch (err) {
-      console.warn('[epp-model] fromMemory falló, se carga desde la URL', id, err)
-      layers = await tf.loadLayersModel(url + 'model.json')
-    }
-    const model = new tm.CustomMobileNet(layers, bundle.metadata)
-    memory.set(url, model)
-    return { id, url, model, layers, metadata: bundle.metadata, source: 'network' }
-  })()
-  inflight.set(url, job)
-  try {
-    return await job
-  } finally {
-    inflight.delete(url)
-  }
 }
 
 async function resolveSheet(urls) {
@@ -234,49 +222,128 @@ async function resolveSheet(urls) {
   }
 }
 
+function readIdbRecord(id, url) {
+  try {
+    const savedUrl = localStorage.getItem(storageKey(id, 'url'))
+    const name = localStorage.getItem(storageKey(id, 'idb'))
+    const metaRaw = localStorage.getItem(storageKey(id, 'meta'))
+    if (savedUrl !== url || !name || !metaRaw) return null
+    return { name, metadata: JSON.parse(metaRaw) }
+  } catch {
+    return null
+  }
+}
+
+function rememberWeight(base, weightUrl) {
+  const bag = window.__eppWeights || (window.__eppWeights = {})
+  const list = bag[base] || (bag[base] = [])
+  if (!list.includes(weightUrl)) list.push(weightUrl)
+}
+
+function abortModelFetches(url) {
+  abortUrl(url + 'model.json')
+  abortUrl(url + 'metadata.json')
+  for (const weightUrl of window.__eppWeights?.[url] || []) abortUrl(weightUrl)
+}
+
 async function runPreload() {
   startedAt = performance.now()
   const initial = configUrls()
   resolved = { ...initial }
   const wanted = new Map(ITEMS.filter(id => initial[id]).map(id => [id, initial[id]]))
+  const hits = []
+  const misses = []
+  for (const [id, url] of wanted) {
+    const record = readIdbRecord(id, url)
+    if (record) hits.push({ id, url, record })
+    else misses.push({ id, url })
+  }
   const sheetPromise = resolveSheet(initial)
-  for (const url of wanted.values()) prefetch(url)
+  for (const { url } of misses) prefetch(url)
+  for (const { url } of hits) abortModelFetches(url)
   progress = {
     loaded: 0,
     total: wanted.size,
+    warmed: 0,
     ready: false,
-    models: Object.fromEntries([...wanted.keys()].map(id => [id, { phase: 'descargando', at: 0 }])),
+    stage: 'red',
+    models: Object.fromEntries([...wanted.keys()].map(id => [id, {
+      phase: hits.some(hit => hit.id === id) ? 'descargado' : 'descargando',
+      at: 0,
+      source: hits.some(hit => hit.id === id) ? 'idb' : 'network',
+    }])),
   }
   emit()
-  console.info('[epp-model]', JSON.stringify({ phase: 'inicio', total: wanted.size, ids: [...wanted.keys()] }))
+  console.info('[epp-model]', JSON.stringify({
+    phase: 'inicio',
+    total: wanted.size,
+    ids: [...wanted.keys()],
+    cache: hits.map(hit => hit.id),
+    network: misses.map(miss => miss.id),
+  }))
 
   const tf = await bootTf()
   const tm = window.tmImage
-  const pending = new Map([...wanted.entries()].map(([id, url]) => [id, downloadOne(tf, tm, id, url)]))
   const sheet = await sheetPromise
   for (const id of ITEMS) {
     const nextUrl = sheet[id] || ''
     if (nextUrl === (wanted.get(id) || '')) continue
     resolved = { ...resolved, [id]: nextUrl }
-    if (!nextUrl) {
-      pending.delete(id)
-      continue
-    }
     wanted.set(id, nextUrl)
-    pending.set(id, downloadOne(tf, tm, id, nextUrl))
   }
   resolved = { ...sheet }
-  const active = [...pending.keys()]
-  progress = { ...progress, total: active.length }
-  emit()
 
-  const downloaded = await Promise.all(active.map(id => pending.get(id)))
-  for (const item of downloaded) {
-    mark(item.id, 'calentando', { source: item.source })
-    await warmup(item.model)
-    mark(item.id, item.source === 'idb' || item.source === 'memory' ? 'cache' : 'listo', { source: item.source })
+  const bundles = new Map()
+  if (misses.length) {
+    await Promise.all(misses.map(async ({ id, url }) => {
+      const bundle = await prefetch(url)
+      bundles.set(id, bundle)
+      mark(id, 'descargado', { source: 'network' })
+    }))
   }
-  progress = { ...progress, ready: true }
+  progress = { ...progress, stage: 'gpu', warmed: 0 }
+  emit()
+  console.info('[epp-model]', JSON.stringify({ phase: 'bytes', at: Math.round(performance.now() - startedAt) }))
+
+  const built = []
+  for (const [id, url] of wanted) {
+    if (!url) continue
+    mark(id, 'preparando', { source: hits.some(hit => hit.id === id) ? 'idb' : 'network' })
+    const record = hits.find(hit => hit.id === id && hit.url === url)?.record
+    let model
+    let layers = null
+    let metadata = null
+    let source = 'network'
+    if (record) {
+      layers = await tf.loadLayersModel(record.name)
+      metadata = record.metadata
+      model = new tm.CustomMobileNet(layers, metadata)
+      source = 'idb'
+    } else {
+      const bundle = bundles.get(id)
+      try {
+        layers = await layersFromBundle(tf, bundle)
+      } catch (err) {
+        console.warn('[epp-model] fromMemory falló, se carga desde la URL', id, err)
+        layers = await tf.loadLayersModel(url + 'model.json')
+      }
+      metadata = bundle.metadata
+      model = new tm.CustomMobileNet(layers, metadata)
+    }
+    memory.set(url, model)
+    if (engineCompileOnly) {
+      try { tf.env().set('ENGINE_COMPILE_ONLY', true) } catch {}
+    }
+    await warmup(model)
+    if (engineCompileOnly) {
+      try { tf.env().set('ENGINE_COMPILE_ONLY', false) } catch {}
+    }
+    built.push({ id, url, model, layers: source === 'network' ? layers : null, metadata, source })
+    progress = { ...progress, warmed: built.length }
+    mark(id, source === 'idb' ? 'cache' : 'listo', { source })
+  }
+
+  progress = { ...progress, ready: true, stage: 'listo' }
   emit()
   console.info('[epp-model]', JSON.stringify({
     phase: 'listos',
@@ -284,7 +351,7 @@ async function runPreload() {
     models: progress.models,
   }))
 
-  const toSave = downloaded.filter(item => item.source === 'network' && item.layers)
+  const toSave = built.filter(item => item.source === 'network' && item.layers)
   Promise.all(toSave.map(item => persist(tf, item.id, item.url, item.layers, item.metadata))).catch(err => {
     console.warn('No se pudieron guardar los modelos en el navegador', err)
   })

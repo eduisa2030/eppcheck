@@ -173,10 +173,12 @@ export default function Scan({ onBack, user }) {
   const badge = s => s === 'bien' ? 'bg-emerald-500' : s === 'mal' ? 'bg-amber-500' : s === 'no_detectado' ? 'bg-white/10' : 'bg-red-500'
   const phaseLabel = phase => ({
     descargando: 'descargando',
+    descargado: 'descargado',
     memoria: 'descargado',
-    calentando: 'calentando',
+    preparando: 'preparando GPU',
+    calentando: 'preparando GPU',
     listo: 'listo',
-    cache: 'en caché',
+    cache: 'listo · caché',
   })[phase] || phase
 
   let headline = 'ESCANEO'
@@ -198,9 +200,11 @@ export default function Scan({ onBack, user }) {
   } else if (loadingModels) {
     headline = 'CARGANDO'
     subtitle = !modelProgress.ready
-      ? (modelProgress.total
-        ? `Cargando modelos… ${modelProgress.loaded}/${modelProgress.total}`
-        : 'Cargando modelos…')
+      ? (modelProgress.stage === 'gpu'
+        ? `Preparando en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
+        : (modelProgress.total
+          ? `Cargando modelos… ${modelProgress.loaded}/${modelProgress.total}`
+          : 'Cargando modelos…'))
       : 'Preparando cámara…'
   } else if (flow.phase === 'verify') {
     headline = 'VERIFICANDO'

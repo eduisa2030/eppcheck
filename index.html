@@ -5,6 +5,50 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>eppcheck</title>
+    <script>
+      (function () {
+        var models = {
+          casco: "https://teachablemachine.withgoogle.com/models/CipT7kvYx/",
+          lentes: "https://teachablemachine.withgoogle.com/models/JpOoTGgap/",
+          chaleco: "https://teachablemachine.withgoogle.com/models/Lmhs4iwPb/"
+        }
+        var files = new Map()
+        var controllers = new Map()
+        window.__eppFiles = files
+        window.__eppAbort = controllers
+        function get(url) {
+          if (files.has(url)) return files.get(url)
+          var ctrl = new AbortController()
+          controllers.set(url, ctrl)
+          var pending = fetch(url, { signal: ctrl.signal }).catch(function () { return null })
+          files.set(url, pending)
+          return pending
+        }
+        Object.keys(models).forEach(function (id) {
+          var base = models[id]
+          try {
+            if (localStorage.getItem("eppcheck_model_url_" + id) === base && localStorage.getItem("eppcheck_model_idb_" + id)) return
+          } catch (e) {}
+          var modelJsonUrl = base + "model.json"
+          get(base + "metadata.json")
+          get(modelJsonUrl).then(function (res) {
+            if (!res || !res.ok) return null
+            return res.clone().json()
+          }).then(function (json) {
+            if (!json || !json.weightsManifest) return
+            window.__eppWeights = window.__eppWeights || {}
+            window.__eppWeights[base] = window.__eppWeights[base] || []
+            json.weightsManifest.forEach(function (group) {
+              ;(group.paths || []).forEach(function (path) {
+                var weightUrl = new URL(path, modelJsonUrl).href
+                if (window.__eppWeights[base].indexOf(weightUrl) === -1) window.__eppWeights[base].push(weightUrl)
+                get(weightUrl)
+              })
+            })
+          }).catch(function () {})
+        })
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
