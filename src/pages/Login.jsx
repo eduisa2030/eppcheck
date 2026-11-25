@@ -32,7 +32,6 @@ export default function Login({ onLogin }) {
         <div className="text-center mb-10">
           <div className="w-16 h-16 mx-auto mb-4 bg-[#FFC21A] rounded-2xl flex items-center justify-center text-2xl font-bold text-black">EPP</div>
           <h1 className="text-3xl font-bold tracking-tight">EPPCheck</h1>
-          <p className="text-[#8A8A98] mt-1 text-sm">Identificación del uso correcto del EPP</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
