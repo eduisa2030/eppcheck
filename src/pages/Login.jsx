@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { login } from '../lib/api'
+import { version } from '../../package.json'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -67,6 +68,7 @@ export default function Login({ onLogin }) {
             {loading ? 'Verificando...' : 'Ingresar'}
           </button>
         </form>
+        <p className="text-center text-[#8A8A98] text-xs mt-8">versión {version}</p>
       </div>
     </div>
   )
