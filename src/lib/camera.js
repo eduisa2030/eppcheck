@@ -150,3 +150,19 @@ export async function openCamera({ facing = 'user', previousDeviceId = null, swi
   const info = trackFacing(stream)
   return { stream, facing: info.facingMode || requested, deviceId: info.deviceId || deviceId }
 }
+
+/** Foto JPEG del cuadro actual del <video>. */
+export function captureVideoFrame(video, { mirrored = false, quality = 0.85 } = {}) {
+  if (!video || !video.videoWidth || !video.videoHeight) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  if (mirrored) {
+    ctx.translate(canvas.width, 0)
+    ctx.scale(-1, 1)
+  }
+  ctx.drawImage(video, 0, 0)
+  return canvas.toDataURL('image/jpeg', quality)
+}

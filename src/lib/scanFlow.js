@@ -32,9 +32,24 @@ export function initialScan(items, now) {
 
 export function activeScanItems(state) {
   if (!state || state.phase === 'done' || state.phase === 'timeout') return []
-  if (state.phase === 'verify') return state.items
+  if (state.phase === 'verify' || state.phase === 'ready') return state.items
   const id = state.items[state.index]
   return id ? [id] : []
+}
+
+/** Todos los elementos del escaneo están en "bien" en este momento. */
+export function isScanValidated(state) {
+  if (!state?.items?.length) return false
+  return state.items.every(id => {
+    const status = state.live[id]?.status || state.final[id]?.status
+    return status === 'bien'
+  })
+}
+
+/** El operador captura el cuadro y cierra el escaneo. */
+export function finishScan(state) {
+  if (!state || state.phase === 'done' || state.phase === 'timeout') return state
+  return { ...state, phase: 'done', notice: '' }
 }
 
 function enterStep(state, index, now, notice) {
@@ -88,6 +103,15 @@ function timeoutScan(state, now) {
   }
 }
 
+function latchInPlace(state, id, pred) {
+  return {
+    ...state,
+    locked: { ...state.locked, [id]: true },
+    final: { ...state.final, [id]: { status: 'bien', conf: pred.conf, locked: true } },
+    live: { ...state.live, [id]: { status: 'bien', conf: pred.conf } },
+  }
+}
+
 function latch(state, id, pred, now) {
   return moveForward({
     ...state,
@@ -120,7 +144,7 @@ function revoke(state, id, now) {
 
 /**
  * Avanza el escaneo con el resultado ya suavizado del tick.
- * Solo el paso actual se predice; la verificación mira todos los modelos.
+ * Solo el paso actual se predice; la verificación y la espera de Capturar miran todos los modelos.
  */
 export function reduceScan(state, { predictions = {}, now }, flow = SCAN) {
   if (state.phase === 'done' || state.phase === 'timeout') return { state, resetIds: [] }
@@ -131,7 +155,8 @@ export function reduceScan(state, { predictions = {}, now }, flow = SCAN) {
     next = { ...next, clockStarted: true, startedAt: now, stepStartedAt: now }
   }
 
-  if (now - next.startedAt >= flow.scanTimeoutMs) return timeoutScan(next, now)
+  // En ready el operador ya validó y puede tardar en pulsar Capturar.
+  if (next.phase !== 'ready' && now - next.startedAt >= flow.scanTimeoutMs) return timeoutScan(next, now)
 
   const live = { ...next.live }
   for (const [id, pred] of Object.entries(predictions)) {
@@ -139,15 +164,23 @@ export function reduceScan(state, { predictions = {}, now }, flow = SCAN) {
   }
   next = { ...next, live }
 
-  if (next.phase === 'verify') {
+  if (next.phase === 'verify' || next.phase === 'ready') {
     const sinConfidence = flow.sinConfidence ?? 0.75
     const revoked = next.items.find(id => {
       const pred = predictions[id]
       return next.locked[id] && pred?.status === 'sin' && pred.conf >= sinConfidence
     })
     if (revoked) return revoke(next, revoked, now)
-    if (now - next.verifyStartedAt >= flow.verifyMs) {
-      return { state: { ...next, phase: 'done', notice: '' }, resetIds: [] }
+    if (next.phase === 'verify' && now - next.verifyStartedAt >= flow.verifyMs) {
+      return { state: { ...next, phase: 'ready', notice: '' }, resetIds: [] }
+    }
+    // En ready se puede recuperar un elemento que había fallado o se había soltado.
+    if (next.phase === 'ready') {
+      for (const id of next.items) {
+        if (next.locked[id]) continue
+        const pred = predictions[id]
+        if (pred?.status === 'bien') next = latchInPlace(next, id, pred)
+      }
     }
     return { state: next, resetIds: [] }
   }

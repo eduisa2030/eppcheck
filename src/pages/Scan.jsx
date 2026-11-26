@@ -5,7 +5,8 @@ import { vibrate, playBeep } from '../lib/feedback'
 import { ITEM_CLASSES, ITEMS } from '../lib/models'
 import { activeModelIds, hasActiveModel, subscribeModelProgress } from '../lib/modelCache'
 import { complianceFromResults, modeledItems, snapshotResults, startDetection } from '../lib/detect'
-import { activeScanItems, armScan, initialScan, reduceScan, stepPrompt } from '../lib/scanFlow'
+import { activeScanItems, armScan, finishScan, initialScan, isScanValidated, reduceScan, stepPrompt } from '../lib/scanFlow'
+import { captureVideoFrame } from '../lib/camera'
 import { useCamera } from '../lib/useCamera'
 import CameraSwitchButton from '../components/CameraSwitchButton'
 
@@ -19,6 +20,7 @@ export default function Scan({ onBack, user }) {
   const flowRef = useRef(flow)
   const [reported, setReported] = useState(false)
   const [showNotifyAsk, setShowNotifyAsk] = useState(false)
+  const [capturedPhoto, setCapturedPhoto] = useState(null)
   const [modelError, setModelError] = useState('')
   const [modelProgress, setModelProgress] = useState({ loaded: 0, total: 0, ready: false })
   const operator = user?.name || user?.user || 'Operador'
@@ -36,6 +38,7 @@ export default function Scan({ onBack, user }) {
     prevLocks.current = 0
     setReported(false)
     setShowNotifyAsk(false)
+    setCapturedPhoto(null)
   }
 
   useEffect(() => subscribeModelProgress(progress => {
@@ -117,6 +120,16 @@ export default function Scan({ onBack, user }) {
     vibrate(judged.cumple ? 40 : [30, 40, 30])
     playBeep(judged.cumple)
   }, [flow, operator])
+
+  const handleCapture = () => {
+    const current = flowRef.current
+    if (current?.phase !== 'ready' || !isScanValidated(current)) return
+    const photo = captureVideoFrame(videoRef.current, { mirrored })
+    setCapturedPhoto(photo)
+    const next = finishScan(current)
+    flowRef.current = next
+    setFlow(next)
+  }
 
   const finished = flow.phase === 'done'
   const timedOut = flow.phase === 'timeout'
@@ -206,6 +219,16 @@ export default function Scan({ onBack, user }) {
           ? `Cargando modelos… ${modelProgress.loaded}/${modelProgress.total}`
           : 'Cargando modelos…'))
       : 'Preparando cámara…'
+  } else if (flow.phase === 'ready') {
+    if (isScanValidated(flow)) {
+      headline = 'VALIDADO'
+      subtitle = 'Presiona Capturar para registrar'
+      tone = 'ok'
+    } else {
+      headline = 'MANTÉN EL EQUIPO'
+      subtitle = 'Se perdió la validación. Acércate de nuevo a la cámara.'
+      tone = 'bad'
+    }
   } else if (flow.phase === 'verify') {
     headline = 'VERIFICANDO'
     subtitle = flow.notice
@@ -224,9 +247,14 @@ export default function Scan({ onBack, user }) {
   return (
     <div className="min-h-screen bg-[#0A0A0F] text-white flex flex-col pb-28">
       <div className="relative mx-5 mt-5 rounded-3xl overflow-hidden bg-black" style={{height:'36vh'}}>
-        <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${mirrored ? '-scale-x-100' : ''}`} />
+        <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${mirrored ? '-scale-x-100' : ''} ${capturedPhoto ? 'invisible' : ''}`} />
+        {capturedPhoto && (
+          <img src={capturedPhoto} alt="Captura del escaneo" className="absolute inset-0 w-full h-full object-cover" />
+        )}
         <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 backdrop-blur px-2.5 py-1 rounded-full text-[11px]">
-          <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" /> EN VIVO
+          {capturedPhoto
+            ? <><span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> CAPTURADO</>
+            : <><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" /> EN VIVO</>}
         </div>
         <button onClick={onBack} className="absolute top-3 right-3 w-8 h-8 bg-black/50 backdrop-blur rounded-full flex items-center justify-center">✕</button>
         {canSwitch && <CameraSwitchButton onClick={switchCamera} disabled={switching} />}
@@ -273,7 +301,8 @@ export default function Scan({ onBack, user }) {
             }
             const final = flow.final[item]
             const isCurrent = flow.phase === 'step' && currentId === item
-            const live = isCurrent ? flow.live[item] : null
+            const watching = isCurrent || flow.phase === 'verify' || flow.phase === 'ready'
+            const live = watching ? flow.live[item] : null
             const status = final?.status || live?.status
             const conf = final?.conf ?? live?.conf
             const label = status === 'no_detectado'
@@ -298,6 +327,22 @@ export default function Scan({ onBack, user }) {
           })}
         </div>
       </div>
+
+      {flow.phase === 'ready' && (
+        <div className="px-5 pt-4 pb-8 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={handleCapture}
+            disabled={!isScanValidated(flow)}
+            className="w-full bg-gradient-to-b from-[#FFE07A] to-[#FFC21A] text-black font-semibold py-5 rounded-2xl text-lg disabled:opacity-40 disabled:pointer-events-none"
+          >
+            Capturar
+          </button>
+          <button type="button" onClick={restart} className="w-full bg-white/5 text-white text-sm py-3.5 rounded-xl border border-white/10">
+            Reiniciar escaneo
+          </button>
+        </div>
+      )}
 
       {(finished || timedOut) && (
         <div className="px-5 pt-4 pb-8 flex flex-col gap-2">
