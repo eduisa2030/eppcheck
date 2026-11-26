@@ -13,11 +13,14 @@ import { activeModelIds, getModel, hasActiveModel, preloadModels } from './model
  * "NO PUESTO" contiene el texto "puesto", así que se resuelve antes
  * de esa búsqueda. Lentes anteriores ("LENTES BIEN", "LENTES MAL", "NADA")
  * siguen valiendo: NADA es "sin poner".
- * Guantes: "Con guantes" es bien, "Sin guantes" es sin, "Mal Puesto" es mal.
+ * Guantes (0RisIVP3D): "Guantes bien puestos" es bien, "Guantes deteriorados" es mal.
+ * Este modelo no tiene clase "sin guantes".
+ * Modelos anteriores: "Con guantes" es bien, "Sin guantes" es sin, "Mal Puesto" es mal.
  */
 export function mapLabel(label) {
   const n = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ')
   if (n.includes('con guantes') || n === 'con guante') return 'bien'
+  if (n.includes('deterior')) return 'mal'
   if (n.includes('no puesto')) return 'sin'
   if (n.includes('mal')) return 'mal'
   if (n.includes('sin') || n.includes('nada')) return 'sin'
