@@ -1,8 +1,9 @@
 // Cargador de modelos Teachable Machine (TensorFlow.js).
 // Versiones fijas: los modelos exportados usan tfjs-layers 1.7.4
 // y @teachablemachine/image declara tfjs 1.3.1 como peer. 1.7.4 carga esos checkpoints.
-const TFJS_SRC = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.4/dist/tf.min.js'
-const TM_SRC = 'https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.5/dist/teachablemachine-image.min.js'
+// Copias locales de las mismas versiones (tfjs 1.7.4 y tm image 0.8.5).
+const TFJS_SRC = `${import.meta.env.BASE_URL}vendor/tf.min.js`
+const TM_SRC = `${import.meta.env.BASE_URL}vendor/teachablemachine-image.min.js`
 
 let tmImage = null
 

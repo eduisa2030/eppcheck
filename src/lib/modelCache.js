@@ -60,7 +60,14 @@ export function getModel(id) {
 function normalizeUrl(url) {
   const trimmed = String(url || '').trim()
   if (!trimmed) return ''
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+  const withSlash = trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+  // new URL(path, base) exige un base absoluto; ./models/... se resuelve aquí.
+  try {
+    if (typeof window !== 'undefined' && window.location?.href) {
+      return new URL(withSlash, window.location.href).href
+    }
+  } catch {}
+  return withSlash
 }
 
 function hashUrl(url) {
@@ -258,7 +265,6 @@ async function runPreload() {
     if (record) hits.push({ id, url, record })
     else misses.push({ id, url })
   }
-  const sheetPromise = resolveSheet(initial)
   for (const { url } of misses) prefetch(url)
   for (const { url } of hits) abortModelFetches(url)
   progress = {
@@ -284,14 +290,6 @@ async function runPreload() {
 
   const tf = await bootTf()
   const tm = window.tmImage
-  const sheet = await sheetPromise
-  for (const id of ITEMS) {
-    const nextUrl = sheet[id] || ''
-    if (nextUrl === (wanted.get(id) || '')) continue
-    resolved = { ...resolved, [id]: nextUrl }
-    wanted.set(id, nextUrl)
-  }
-  resolved = { ...sheet }
 
   const bundles = new Map()
   if (misses.length) {
@@ -350,6 +348,19 @@ async function runPreload() {
     at: Math.round(performance.now() - startedAt),
     models: progress.models,
   }))
+
+  // Después de listos, para no competir con la descarga ni la GPU.
+  resolveSheet(initial).then(sheet => {
+    const diffs = {}
+    for (const id of ITEMS) {
+      const remote = (sheet[id] || '').trim()
+      const local = wanted.get(id) || ''
+      if (remote && remote !== local) diffs[id] = remote
+    }
+    if (Object.keys(diffs).length) {
+      console.info('[epp-model]', JSON.stringify({ phase: 'hoja-diferente', diffs }))
+    }
+  }).catch(() => {})
 
   const toSave = built.filter(item => item.source === 'network' && item.layers)
   Promise.all(toSave.map(item => persist(tf, item.id, item.url, item.layers, item.metadata))).catch(err => {

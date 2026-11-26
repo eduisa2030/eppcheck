@@ -5,12 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>eppcheck</title>
+    <link rel="preload" as="script" href="./vendor/tf.min.js" />
+    <link rel="preload" as="script" href="./vendor/teachablemachine-image.min.js" />
     <script>
       (function () {
         var models = {
-          casco: "https://teachablemachine.withgoogle.com/models/CipT7kvYx/",
-          lentes: "https://teachablemachine.withgoogle.com/models/JpOoTGgap/",
-          chaleco: "https://teachablemachine.withgoogle.com/models/Lmhs4iwPb/"
+          casco: "./models/CipT7kvYx/",
+          lentes: "./models/JpOoTGgap/",
+          chaleco: "./models/Lmhs4iwPb/"
         }
         var files = new Map()
         var controllers = new Map()
@@ -24,8 +26,12 @@
           files.set(url, pending)
           return pending
         }
+        function abs(url) {
+          try { return new URL(url, window.location.href).href } catch (e) { return url }
+        }
         Object.keys(models).forEach(function (id) {
-          var base = models[id]
+          var base = abs(models[id])
+          if (base && base.charAt(base.length - 1) !== "/") base += "/"
           try {
             if (localStorage.getItem("eppcheck_model_url_" + id) === base && localStorage.getItem("eppcheck_model_idb_" + id)) return
           } catch (e) {}

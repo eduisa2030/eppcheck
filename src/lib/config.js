@@ -1,15 +1,16 @@
 /**
  * Modelos de Teachable Machine.
  * Para cambiar un modelo, edita solo MODELS.
- * La URL es la del modelo publicado (con o sin "/" final);
+ * La URL es la carpeta del modelo (con o sin "/" final),
+ * servida desde este mismo sitio en /models/<id>/;
  * la app carga <url>model.json y <url>metadata.json.
  * Una cadena vacía deja el elemento fuera del cumplimiento
  * y lo muestra como "Sin modelo aún".
  */
 export const MODELS = {
-  casco: 'https://teachablemachine.withgoogle.com/models/CipT7kvYx/',
-  lentes: 'https://teachablemachine.withgoogle.com/models/JpOoTGgap/',
-  chaleco: 'https://teachablemachine.withgoogle.com/models/Lmhs4iwPb/',
+  casco: './models/CipT7kvYx/',
+  lentes: './models/JpOoTGgap/',
+  chaleco: './models/Lmhs4iwPb/',
   guantes: '',
 }
 

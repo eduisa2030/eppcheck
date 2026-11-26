@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { login } from '../lib/api'
+import { subscribeModelProgress } from '../lib/modelCache'
 import { version } from '../../package.json'
 
 export default function Login({ onLogin }) {
@@ -7,6 +8,9 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [modelProgress, setModelProgress] = useState({ ready: false, loaded: 0, total: 0 })
+
+  useEffect(() => subscribeModelProgress(setModelProgress), [])
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -68,6 +72,15 @@ export default function Login({ onLogin }) {
           </button>
         </form>
         <p className="text-center text-[#8A8A98] text-xs mt-8">versión {version}</p>
+        {!modelProgress.ready && (
+          <p className="text-center text-[#8A8A98] text-xs mt-2">
+            {modelProgress.stage === 'gpu'
+              ? `Preparando modelos en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
+              : (modelProgress.total
+                ? `Preparando modelos… ${modelProgress.loaded}/${modelProgress.total}`
+                : 'Preparando modelos…')}
+          </p>
+        )}
       </div>
     </div>
   )
