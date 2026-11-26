@@ -12,3 +12,9 @@
 
 /vendor/*
   Cache-Control: public, max-age=31536000, immutable
+
+/Inter.woff2
+  Cache-Control: public, max-age=31536000
+
+/Inter.ttf
+  Cache-Control: public, max-age=31536000

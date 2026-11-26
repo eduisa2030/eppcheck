@@ -1,18 +1,10 @@
 /**
  * Modelos de Teachable Machine.
- * Para cambiar un modelo, edita solo MODELS.
- * La URL es la carpeta del modelo (con o sin "/" final),
- * servida desde este mismo sitio en /models/<id>/;
- * la app carga <url>model.json y <url>metadata.json.
- * Una cadena vacía deja el elemento fuera del cumplimiento
- * y lo muestra como "Sin modelo aún".
+ * Para cambiar un modelo: copia la carpeta exportada (model.json, metadata.json,
+ * model.weights.bin) a models-src/<id>/, pon el id en models-src/models.json
+ * y corre npm run build. scripts/split-models.mjs separa el extractor común
+ * de la cabeza de cada pieza y genera src/lib/modelManifest.json.
  */
-export const MODELS = {
-  casco: './models/CipT7kvYx/',
-  lentes: './models/JpOoTGgap/',
-  chaleco: './models/Lmhs4iwPb/',
-  guantes: './models/YLkRIfGZJ/',
-}
 
 // Una sola lectura no cambia el estado: ventana ~1.3 s y banda de histéresis.
 export const SMOOTHING = {
@@ -31,13 +23,7 @@ export const CLASS_BIAS = {
 
 // Duración de cada fase del escaneo guiado.
 export const SCAN = {
+  // Tiempo seguido en «bien» para que la pieza quede validada sola.
   latchMs: 1000,
-  stepTimeoutMs: 10000,
-  verifyMs: 2000,
-  scanTimeoutMs: 60000,
-  sinConfidence: 0.75,
 }
 
-export function hasModel(id) {
-  return typeof MODELS[id] === 'string' && MODELS[id].trim().length > 0
-}

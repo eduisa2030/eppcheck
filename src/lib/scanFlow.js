@@ -1,287 +1,139 @@
+// Flujo de validación por partes.
+//   pledge -> step (casco) -> step (lentes) -> step (chaleco) -> step (guantes) -> photo -> done
+// Cada pieza validada queda FIJA: nunca se revoca después.
+// En cada paso solo se predice la pieza actual.
 import { SCAN } from './config'
-import { BODY_ITEMS, HAND_ITEMS } from './models'
+import { ITEMS } from './models'
 
-export function stepPrompt(id, shot) {
-  if (id === 'guantes' || shot === 'hands') return 'Acerca tus manos con guantes a la cámara'
-  return `Ahora: ${id} — acércate a la cámara`
+export const PLEDGE_TEXT = 'Me comprometo a portar todo mi EPP durante el turno. Quitarme una pieza ya validada va en contra del reglamento de seguridad de la empresa.'
+
+const NAMES = { casco: 'casco', lentes: 'lentes', chaleco: 'chaleco', guantes: 'guantes' }
+
+export function stepPrompt(id) {
+  if (id === 'guantes') return 'Acerca tus manos con guantes a la cámara'
+  if (id === 'lentes') return 'Acerca tu cara a la cámara con los lentes puestos'
+  if (id === 'chaleco') return 'Aléjate un poco para que se vea tu chaleco'
+  return 'Ponte frente a la cámara con el casco puesto'
 }
 
-export function revokePrompt(id) {
-  return `Vuelve a ponerte el ${id}`
+export function stepTitle(state) {
+  if (!state) return ''
+  if (state.phase === 'step') return `Paso ${state.index + 1} de ${state.steps.length + 1} · ${NAMES[state.steps[state.index]] || state.steps[state.index]}`
+  if (state.phase === 'photo') return `Paso ${state.steps.length + 1} de ${state.steps.length + 1} · Foto de evidencia`
+  return ''
 }
 
-export function shotTitle(state) {
-  const shots = state?.shots || []
-  if (shots.length < 2) return ''
-  const i = (state.shotIndex || 0) + 1
-  if (state.shot === 'hands') return `Toma ${i} de ${shots.length} · Guantes`
-  return `Toma ${i} de ${shots.length} · Cuerpo y cara`
-}
-
-export function hasNextShot(state) {
-  return (state?.shotIndex || 0) + 1 < (state?.shots?.length || 0)
-}
-
-export function armScan(state, now) {
-  if (!state || state.clockStarted || state.phase === 'done' || state.phase === 'timeout') return state
-  return { ...state, clockStarted: true, startedAt: now, stepStartedAt: now }
-}
-
-function buildShots(ids) {
-  const have = new Set(ids || [])
-  const shots = []
-  const body = BODY_ITEMS.filter(id => have.has(id))
-  const hands = HAND_ITEMS.filter(id => have.has(id))
-  if (body.length) shots.push({ id: 'body', items: body })
-  if (hands.length) shots.push({ id: 'hands', items: hands })
-  return shots
-}
-
-export function initialScan(items, now) {
-  const shots = buildShots(items)
-  const current = shots[0]
+export function initialScan(items, now = Date.now()) {
+  const have = new Set(items || [])
+  const steps = ITEMS.filter(id => have.has(id))
   return {
-    phase: current ? 'step' : 'done',
-    shot: current?.id || 'body',
-    shotIndex: 0,
-    shots,
-    items: current?.items || [],
-    allItems: shots.flatMap(shot => shot.items),
+    phase: 'pledge',
+    steps,
     index: 0,
-    startedAt: now,
     stepStartedAt: now,
-    verifyStartedAt: null,
-    clockStarted: false,
     bienSince: null,
-    locked: {},
     final: {},
     live: {},
-    photos: {},
-    notice: '',
+    pledge: null,
+    photo: null,
   }
 }
 
+export function currentItem(state) {
+  return state?.phase === 'step' ? state.steps[state.index] || null : null
+}
+
+/** Solo la pieza del paso actual. */
 export function activeScanItems(state) {
-  if (!state || state.phase === 'done' || state.phase === 'timeout') return []
-  if (state.phase === 'verify' || state.phase === 'ready') return state.items
-  const id = state.items[state.index]
+  const id = currentItem(state)
   return id ? [id] : []
 }
 
-/** Los elementos de la toma actual están en "bien" en este momento. */
-export function isScanValidated(state) {
-  if (!state?.items?.length) return false
-  return state.items.every(id => {
-    const status = state.live[id]?.status || state.final[id]?.status
-    return status === 'bien'
-  })
+export function acceptPledge(state, operator, now = Date.now()) {
+  if (!state || state.phase !== 'pledge') return state
+  const at = new Date(now)
+  const pledge = {
+    aceptada: true,
+    texto: PLEDGE_TEXT,
+    operador: operator,
+    timestamp: at.toISOString(),
+    fecha: at.toLocaleDateString('es-MX'),
+    hora: at.toLocaleTimeString('es-MX', { hour12: false }),
+  }
+  return enterStep({ ...state, pledge }, 0, now)
 }
 
-export function finishScan(state) {
-  if (!state || state.phase === 'done' || state.phase === 'timeout') return state
-  return { ...state, phase: 'done', notice: '' }
-}
-
-function enterShot(state, shotIndex, photos, now) {
-  const shot = state.shots[shotIndex]
+function enterStep(state, index, now) {
+  if (index >= state.steps.length) return { ...state, phase: 'photo', index, bienSince: null }
+  const id = state.steps[index]
   const live = { ...state.live }
-  for (const id of shot?.items || []) delete live[id]
+  delete live[id]
+  return { ...state, phase: 'step', index, stepStartedAt: now, bienSince: null, live }
+}
+
+function record(state, id, status, conf, now) {
+  const at = new Date(now)
   return {
     ...state,
-    phase: shot ? 'step' : 'done',
-    shot: shot?.id || state.shot,
-    shotIndex,
-    items: shot?.items || [],
-    index: 0,
-    startedAt: now,
-    stepStartedAt: now,
-    verifyStartedAt: null,
-    bienSince: null,
-    clockStarted: false,
-    photos: photos || state.photos || {},
-    notice: '',
-    live,
-  }
-}
-
-/** Congela el estado actual de la toma: «bien» queda bien; el resto, no validado. */
-export function freezeShotItems(state) {
-  const final = { ...state.final }
-  const locked = { ...state.locked }
-  const live = { ...state.live }
-  for (const id of state.items || []) {
-    const current = live[id] || final[id]
-    const raw = current?.status
-    const status = raw === 'bien' || raw === 'mal' || raw === 'sin' ? raw : 'no_detectado'
-    const conf = status === 'no_detectado' ? 0 : (current?.conf ?? 0)
-    final[id] = { status, conf, locked: status === 'bien' }
-    live[id] = { status, conf }
-    if (status === 'bien') locked[id] = true
-    else delete locked[id]
-  }
-  return { ...state, final, locked, live }
-}
-
-/** Guarda la foto y el estado de la toma actual. Si hay otra toma, avanza; si no, cierra el escaneo. */
-export function captureShot(state, photo, now) {
-  if (!state || state.phase === 'done' || state.phase === 'timeout') return state
-  const frozen = freezeShotItems(state)
-  const photos = { ...(frozen.photos || {}) }
-  if (frozen.shot) photos[frozen.shot] = photo || null
-  if (hasNextShot(frozen)) return enterShot(frozen, frozen.shotIndex + 1, photos, now)
-  return { ...frozen, phase: 'done', notice: '', photos }
-}
-
-function enterStep(state, index, now, notice) {
-  const id = state.items[index]
-  const live = { ...state.live }
-  if (id) delete live[id]
-  return {
-    state: {
-      ...state,
-      phase: 'step',
-      index,
-      stepStartedAt: now,
-      verifyStartedAt: null,
-      bienSince: null,
-      notice: notice || '',
-      live,
+    final: {
+      ...state.final,
+      [id]: {
+        status,
+        conf,
+        locked: status === 'bien',
+        timestamp: at.toISOString(),
+        hora: at.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+      },
     },
-    resetIds: id ? [id] : [],
   }
 }
 
-function enterVerify(state, now) {
-  return {
-    state: {
-      ...state,
-      phase: 'verify',
-      verifyStartedAt: now,
-      bienSince: null,
-      notice: state.shot === 'hands' ? 'Revisando los guantes…' : 'Revisando que todo siga puesto…',
-    },
-    resetIds: [],
-  }
+/** Botón Capturar en un paso: registra el estado del momento y avanza. */
+export function captureStep(state, now = Date.now()) {
+  const id = currentItem(state)
+  if (!id) return state
+  const current = state.live[id]
+  const raw = current?.status
+  const status = raw === 'bien' || raw === 'mal' || raw === 'sin' ? raw : 'no_detectado'
+  const conf = status === 'no_detectado' ? 0 : (current?.conf ?? 0)
+  return enterStep(record(state, id, status, conf, now), state.index + 1, now)
 }
 
-function moveForward(state, now) {
-  for (let i = state.index + 1; i < state.items.length; i++) {
-    if (!state.locked[state.items[i]]) return enterStep(state, i, now, '')
-  }
-  return enterVerify(state, now)
+/** Botón Capturar en la foto de cuerpo completo: no pasa por el modelo. */
+export function capturePhoto(state, photo) {
+  if (!state || state.phase !== 'photo') return state
+  return { ...state, phase: 'done', photo: photo || null }
 }
 
-function timeoutScan(state, now) {
-  return {
-    state: {
-      ...initialScan(state.allItems || state.items, now),
-      phase: 'timeout',
-      clockStarted: true,
-      notice: 'Se agotó el tiempo del escaneo.',
-      photos: state.photos || {},
-      locked: state.locked,
-      final: state.final,
-    },
-    resetIds: (state.allItems || state.items).slice(),
-  }
-}
-
-function latchInPlace(state, id, pred) {
-  return {
-    ...state,
-    locked: { ...state.locked, [id]: true },
-    final: { ...state.final, [id]: { status: 'bien', conf: pred.conf, locked: true } },
-    live: { ...state.live, [id]: { status: 'bien', conf: pred.conf } },
-  }
-}
-
-function latch(state, id, pred, now) {
-  return moveForward({
-    ...state,
-    bienSince: null,
-    locked: { ...state.locked, [id]: true },
-    final: { ...state.final, [id]: { status: 'bien', conf: pred.conf, locked: true } },
-    live: { ...state.live, [id]: { status: 'bien', conf: pred.conf } },
-  }, now)
-}
-
-function giveUp(state, id, pred, now) {
-  const status = pred?.status === 'mal' || pred?.status === 'sin' ? pred.status : 'no_detectado'
-  const conf = status === 'no_detectado' ? 0 : pred.conf
-  return moveForward({
-    ...state,
-    bienSince: null,
-    final: { ...state.final, [id]: { status, conf, locked: false } },
-    live: { ...state.live, [id]: { status, conf } },
-  }, now)
-}
-
-function revoke(state, id, now) {
-  const locked = { ...state.locked }
-  const final = { ...state.final }
-  delete locked[id]
-  delete final[id]
-  const index = Math.max(0, state.items.indexOf(id))
-  return enterStep({ ...state, locked, final, index }, index, now, revokePrompt(id))
-}
-
-/**
- * Avanza el escaneo con el resultado ya suavizado del tick.
- * En cada toma solo se predice el paso actual; la verificación y Capturar
- * miran únicamente los elementos de esa toma, no los de la otra.
- */
+/** Avanza con el resultado ya suavizado del cuadro. Solo puede validar; nunca revoca. */
 export function reduceScan(state, { predictions = {}, now }, flow = SCAN) {
-  if (state.phase === 'done' || state.phase === 'timeout') return { state, resetIds: [] }
-
-  let next = state
-  const live = { ...next.live }
-  for (const [id, pred] of Object.entries(predictions)) {
-    if (pred?.status || pred?.pBien != null) {
-      live[id] = { status: pred.status || live[id]?.status, conf: pred.conf ?? live[id]?.conf ?? 0, pBien: pred.pBien }
-    }
-  }
-  next = { ...next, live }
-
-  if (!next.clockStarted) {
-    if (!Object.values(predictions).some(pred => pred?.status)) return { state: next, resetIds: [] }
-    next = { ...next, clockStarted: true, startedAt: now, stepStartedAt: now }
-  }
-
-  // En ready el operador ya validó y puede tardar en pulsar Capturar.
-  if (next.phase !== 'ready' && now - next.startedAt >= flow.scanTimeoutMs) return timeoutScan(next, now)
-
-  if (next.phase === 'verify' || next.phase === 'ready') {
-    const sinConfidence = flow.sinConfidence ?? 0.75
-    // Solo se puede revocar un elemento de la toma actual, nunca el casco en la toma de guantes.
-    const revoked = next.items.find(id => {
-      const pred = predictions[id]
-      return next.locked[id] && pred?.status === 'sin' && pred.conf >= sinConfidence
-    })
-    if (revoked) return revoke(next, revoked, now)
-    if (next.phase === 'verify' && now - next.verifyStartedAt >= flow.verifyMs) {
-      return { state: { ...next, phase: 'ready', notice: '' }, resetIds: [] }
-    }
-    if (next.phase === 'ready') {
-      for (const id of next.items) {
-        if (next.locked[id]) continue
-        const pred = predictions[id]
-        if (pred?.status === 'bien') next = latchInPlace(next, id, pred)
-      }
-    }
-    return { state: next, resetIds: [] }
-  }
-
-  const id = next.items[next.index]
+  const id = currentItem(state)
+  if (!id) return { state, resetIds: [] }
   const pred = predictions[id]
+  if (!pred) return { state, resetIds: [] }
+  const live = { ...state.live, [id]: { status: pred.status || state.live[id]?.status, conf: pred.conf ?? 0, pBien: pred.pBien } }
+  let next = { ...state, live }
   let bienSince = next.bienSince
-  if (pred?.status === 'bien') {
+  if (pred.status === 'bien') {
     if (bienSince == null) bienSince = now
-  } else if (pred) {
+  } else {
     bienSince = null
   }
   next = { ...next, bienSince }
-
-  if (pred?.status === 'bien' && now - bienSince >= flow.latchMs) return latch(next, id, pred, now)
-  if (now - next.stepStartedAt >= flow.stepTimeoutMs) return giveUp(next, id, pred, now)
+  if (pred.status === 'bien' && now - bienSince >= flow.latchMs) {
+    next = enterStep(record(next, id, 'bien', pred.conf, now), next.index + 1, now)
+    return { state: next, resetIds: [id] }
+  }
   return { state: next, resetIds: [] }
+}
+
+/** Resultado final: todas las piezas con modelo deben estar en «bien». */
+export function scanResult(state) {
+  const details = {}
+  for (const id of state.steps) {
+    const row = state.final[id]
+    details[id] = row ? { ...row } : { status: 'no_detectado', conf: 0, locked: false }
+  }
+  const missing = state.steps.filter(id => details[id].status !== 'bien')
+  return { details, missing, cumple: state.steps.length > 0 && missing.length === 0 }
 }

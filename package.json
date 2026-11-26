@@ -1,16 +1,21 @@
 {
   "name": "eppcheck",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "models": "node scripts/split-models.mjs",
+    "build": "node scripts/split-models.mjs && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy": "vite build && bash scripts/cf-deploy.sh"
+    "deploy": "npm run build && bash scripts/cf-deploy.sh"
   },
   "dependencies": {
+    "@tensorflow/tfjs-backend-cpu": "^4.22.0",
+    "@tensorflow/tfjs-backend-webgl": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
+    "@tensorflow/tfjs-layers": "^4.22.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

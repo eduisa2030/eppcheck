@@ -1,35 +1,48 @@
-import { BODY_ITEMS, ITEMS } from './models'
-import { MODELS } from './config'
-import { getModelUrls } from './api'
-import { loadTM } from './tm'
+// Motor de modelos de EPP Check.
+//
+// Los 4 modelos de Teachable Machine comparten el mismo extractor MobileNet
+// (verificado byte a byte en scripts/split-models.mjs). Por eso:
+//   - el extractor se descarga, se sube a la GPU y se calienta UNA sola vez;
+//   - cada pieza (casco, lentes, chaleco, guantes) solo tiene su cabeza densa (~0.5 MB);
+//   - en cada cuadro se corre el extractor una vez y luego solo la cabeza de la pieza que toca.
+// La salida es la misma que la del modelo original de Teachable Machine.
+import manifest from './modelManifest.json'
+import { ITEMS } from './models'
+import { loadTf } from './tm'
 
-const memory = new Map()
-const prefetched = new Map()
-let bootPromise = null
-let preloadPromise = null
-let bodyReadyWait = null
-let engineCompileOnly = false
-let resolved = null
-let startedAt = 0
-let progress = { loaded: 0, total: 0, ready: false, handsReady: false, models: {} }
+const ORDER = ITEMS.filter(id => manifest.items[id])
+const FIRST = ORDER[0]
 const listeners = new Set()
-
-function emit() {
-  const loaded = Object.values(progress.models).filter(item => (
-    item.phase === 'memoria' || item.phase === 'calentando' || item.phase === 'listo' || item.phase === 'cache'
-  )).length
-  progress = { ...progress, loaded }
-  listeners.forEach(fn => fn(progress))
+const heads = new Map() // id -> { model, labels }
+const bases = new Map() // baseId -> model
+const downloads = new Map()
+const itemWaits = new Map()
+let started = false
+let startedAt = 0
+let tfRef = null
+let progress = {
+  stage: 'red',
+  total: ORDER.length,
+  loaded: 0,
+  ready: false,
+  handsReady: false,
+  allReady: false,
+  itemsReady: {},
+  error: '',
 }
 
-function mark(id, phase, extra = {}) {
-  const at = startedAt ? Math.round(performance.now() - startedAt) : 0
-  progress = {
-    ...progress,
-    models: { ...progress.models, [id]: { phase, at, ...extra } },
-  }
-  console.info('[epp-model]', JSON.stringify({ id, phase, at, ...extra }))
-  emit()
+function since() {
+  return startedAt ? Math.round(performance.now() - startedAt) : 0
+}
+
+function log(data) {
+  console.info('[epp-model]', JSON.stringify({ at: since(), ...data }))
+}
+
+function setProgress(patch) {
+  progress = { ...progress, ...patch }
+  progress.loaded = Object.values(progress.itemsReady).filter(Boolean).length
+  listeners.forEach(fn => fn(progress))
 }
 
 export function subscribeModelProgress(listener) {
@@ -39,411 +52,260 @@ export function subscribeModelProgress(listener) {
 }
 
 export function activeModelIds() {
-  const urls = resolved || MODELS
-  return ITEMS.filter(id => typeof urls[id] === 'string' && urls[id].trim())
-}
-
-export function modelUrlFor(id) {
-  const urls = resolved || MODELS
-  return (urls[id] || '').trim()
+  return ORDER.slice()
 }
 
 export function hasActiveModel(id) {
-  return Boolean(modelUrlFor(id))
+  return Boolean(manifest.items[id])
 }
 
-export function getModel(id) {
-  const url = normalizeUrl(modelUrlFor(id))
-  if (!url) return null
-  return memory.get(url) || null
+export function isItemReady(id) {
+  return heads.has(id) && bases.has(manifest.items[id]?.base)
 }
 
-function normalizeUrl(url) {
-  const trimmed = String(url || '').trim()
-  if (!trimmed) return ''
-  const withSlash = trimmed.endsWith('/') ? trimmed : `${trimmed}/`
-  // new URL(path, base) exige un base absoluto; ./models/... se resuelve aquí.
-  try {
-    if (typeof window !== 'undefined' && window.location?.href) {
-      return new URL(withSlash, window.location.href).href
-    }
-  } catch {}
-  return withSlash
+export function modelStatusText(p = progress) {
+  if (p.error) return 'No se pudieron cargar los modelos'
+  if (!p.ready) return p.stage === 'gpu' ? 'Preparando el modelo en el teléfono…' : 'Descargando el modelo…'
+  if (!p.allReady) return `Listo para escanear · ${p.loaded}/${p.total} piezas`
+  return ''
 }
 
-function hashUrl(url) {
-  let hash = 0
-  for (let i = 0; i < url.length; i++) hash = Math.imul(31, hash) + url.charCodeAt(i) | 0
-  return (hash >>> 0).toString(36)
+function urlOf(path) {
+  return new URL(`${import.meta.env.BASE_URL}${path}`, window.location.href).href
 }
 
-function storageKey(id, suffix) {
-  return `eppcheck_model_${suffix}_${id}`
+function idbKey(entry) {
+  return `indexeddb://eppcheck-${entry.hash}`
 }
 
-function configUrls() {
-  const urls = {}
-  for (const id of ITEMS) urls[id] = normalizeUrl(MODELS[id] || '')
-  return urls
+function idbFlag(entry) {
+  return `eppcheck_idb_${entry.hash}`
 }
 
-async function bootTf() {
-  if (!bootPromise) {
-    bootPromise = (async () => {
-      await loadTM()
-      const tf = window.tf
-      if (!tf) throw new Error('TensorFlow.js no está cargado')
-      try {
-        await tf.setBackend('webgl')
-      } catch (err) {
-        console.warn('WebGL no disponible, se usa el backend por defecto', err)
-      }
-      await tf.ready()
-      const flags = { webglPack: false, compileOnly: false, parallelShader: false }
-      try {
-        tf.env().set('WEBGL_PACK', true)
-        flags.webglPack = tf.env().getBool('WEBGL_PACK')
-      } catch {}
-      try {
-        tf.env().set('ENGINE_COMPILE_ONLY', true)
-        flags.compileOnly = tf.env().getBool('ENGINE_COMPILE_ONLY') === true
-        tf.env().set('ENGINE_COMPILE_ONLY', false)
-      } catch {}
-      try {
-        const gl = tf.backend()?.gpgpu?.gl || tf.backend()?.getGPGPUContext?.()?.gl
-        flags.parallelShader = Boolean(gl?.getExtension?.('KHR_parallel_shader_compile'))
-      } catch {}
-      engineCompileOnly = flags.compileOnly
-      console.info('[epp-model]', JSON.stringify({ phase: 'tf', flags }))
-      return tf
-    })().catch(err => {
-      bootPromise = null
-      throw err
-    })
+function inIdb(entry) {
+  try { return localStorage.getItem(idbFlag(entry)) === '1' } catch { return false }
+}
+
+/** Descarga model.json y los pesos en paralelo (no espera a leer el JSON para pedir los pesos). */
+function download(entry) {
+  if (!downloads.has(entry.model)) {
+    const p = Promise.all([
+      fetch(urlOf(entry.model)).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} en ${entry.model}`)
+        return r.json()
+      }),
+      fetch(urlOf(entry.weights)).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} en ${entry.weights}`)
+        return r.arrayBuffer()
+      }),
+    ])
+    p.catch(() => downloads.delete(entry.model))
+    downloads.set(entry.model, p)
   }
-  return bootPromise
+  return downloads.get(entry.model)
 }
 
-async function warmup(model) {
-  const canvas = document.createElement('canvas')
-  canvas.width = 224
-  canvas.height = 224
+async function buildLayers(tf, entry) {
+  if (inIdb(entry)) {
+    try {
+      const model = await tf.loadLayersModel(idbKey(entry))
+      return { model, source: 'idb' }
+    } catch (err) {
+      console.warn('[epp-model] caché del navegador inválida, se descarga', entry.model, err)
+      try { localStorage.removeItem(idbFlag(entry)) } catch {}
+    }
+  }
+  const [json, weightData] = await download(entry)
+  const model = await tf.loadLayersModel(tf.io.fromMemory({
+    modelTopology: json.modelTopology,
+    weightSpecs: json.weightsManifest.flatMap(group => group.weights),
+    weightData,
+    format: json.format,
+    generatedBy: json.generatedBy,
+    convertedBy: json.convertedBy,
+  }))
+  return { model, source: 'network' }
+}
+
+function persist(entry, model) {
+  // Después de estar listos, para no competir con la GPU.
+  setTimeout(() => {
+    model.save(idbKey(entry)).then(() => {
+      try { localStorage.setItem(idbFlag(entry), '1') } catch {}
+    }).catch(err => console.warn('[epp-model] no se pudo guardar en el navegador', err))
+  }, 1500)
+}
+
+/** Recorta el centro y escala a size×size, igual que cropTo de @teachablemachine/image. */
+function cropTo(image, size, canvas) {
+  let width = image.width
+  let height = image.height
+  if (typeof HTMLVideoElement !== 'undefined' && image instanceof HTMLVideoElement) {
+    width = image.videoWidth
+    height = image.videoHeight
+  }
+  const min = Math.min(width, height)
+  const scale = size / min
+  const scaledW = Math.ceil(width * scale)
+  const scaledH = Math.ceil(height * scale)
+  const dx = scaledW - size
+  const dy = scaledH - size
+  canvas.width = canvas.height = size
   const ctx = canvas.getContext('2d')
-  if (ctx) {
-    ctx.fillStyle = '#777'
-    ctx.fillRect(0, 0, 224, 224)
-  }
-  await model.predict(canvas)
+  ctx.drawImage(image, ~~(dx / 2) * -1, ~~(dy / 2) * -1, scaledW, scaledH)
+  return canvas
 }
 
-function prefetch(url) {
-  if (!prefetched.has(url)) prefetched.set(url, fetchBundle(url))
-  return prefetched.get(url)
+/** Igual que capture() de @teachablemachine/image: píxeles 0-255 a [-1, 1]. */
+function toInput(tf, canvas) {
+  // Operaciones funcionales: el bundle no registra los métodos encadenados (x.div()...).
+  const batched = tf.expandDims(tf.browser.fromPixels(canvas), 0)
+  return tf.sub(tf.div(tf.cast(batched, 'float32'), tf.scalar(127)), tf.scalar(1))
 }
 
-function sharedFetch(url) {
-  const bag = typeof window !== 'undefined' ? window.__eppFiles : null
-  if (bag?.has(url)) return bag.get(url)
-  const controller = new AbortController()
-  window.__eppAbort?.set(url, controller)
-  const pending = fetch(url, { signal: controller.signal }).catch(err => {
-    if (err?.name === 'AbortError') return null
-    throw err
-  })
-  if (bag) bag.set(url, pending)
-  return pending
+function makeCanvas() {
+  // Un canvas nuevo por cuadro, igual que @teachablemachine/image.
+  return document.createElement('canvas')
 }
 
-function abortUrl(url) {
-  window.__eppAbort?.get(url)?.abort()
+async function warmBase(tf, base) {
+  // Cuadro gris de 224×224 por el mismo camino que la cámara: compila todos los shaders una vez.
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 224
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#777'
+  ctx.fillRect(0, 0, 224, 224)
+  const out = tf.tidy(() => base.predict(toInput(tf, canvas)))
+  await out.data()
+  out.dispose()
 }
 
-async function fetchBundle(url) {
-  const modelJsonUrl = url + 'model.json'
-  const [modelRes, metaRes] = await Promise.all([
-    sharedFetch(modelJsonUrl),
-    sharedFetch(url + 'metadata.json'),
-  ])
-  if (!modelRes?.ok || !metaRes?.ok) throw new Error(`No se pudo descargar ${url}`)
-  const modelJSON = await modelRes.json()
-  const metadata = await metaRes.json()
-  const specs = []
-  const parts = []
-  for (const group of modelJSON.weightsManifest || []) {
-    const buffers = await Promise.all((group.paths || []).map(async (path) => {
-      const weightUrl = new URL(path, modelJsonUrl).href
-      rememberWeight(url, weightUrl)
-      const response = await sharedFetch(weightUrl)
-      if (!response?.ok) throw new Error(`No se pudieron leer los pesos de ${url}`)
-      return response.arrayBuffer()
-    }))
-    specs.push(...(group.weights || []))
-    parts.push(...buffers)
-  }
-  const total = parts.reduce((sum, buffer) => sum + buffer.byteLength, 0)
-  const weightData = new Uint8Array(total)
-  let offset = 0
-  for (const part of parts) {
-    weightData.set(new Uint8Array(part), offset)
-    offset += part.byteLength
-  }
-  return { modelJSON, metadata, specs, weightData: weightData.buffer }
+async function warmHead(tf, head) {
+  const out = tf.tidy(() => head.predict(tf.zeros([1, head.inputs[0].shape[1]])))
+  await out.data()
+  out.dispose()
 }
 
-async function layersFromBundle(tf, bundle) {
-  const handler = tf.io.fromMemory({
-    modelTopology: bundle.modelJSON.modelTopology,
-    weightSpecs: bundle.specs,
-    weightData: bundle.weightData,
-    format: bundle.modelJSON.format,
-    generatedBy: bundle.modelJSON.generatedBy,
-    convertedBy: bundle.modelJSON.convertedBy,
-  })
-  return tf.loadLayersModel(handler)
-}
-
-async function persist(tf, id, url, layers, metadata) {
-  const name = `indexeddb://eppcheck-${id}-${hashUrl(url)}`
-  const previous = localStorage.getItem(storageKey(id, 'idb'))
-  if (previous && previous !== name) {
-    try { await tf.io.removeModel(previous) } catch {}
-  }
-  await layers.save(name)
-  localStorage.setItem(storageKey(id, 'idb'), name)
-  localStorage.setItem(storageKey(id, 'url'), url)
-  localStorage.setItem(storageKey(id, 'meta'), JSON.stringify(metadata))
-  console.info('[epp-model]', JSON.stringify({ id, phase: 'guardado', url }))
-}
-
-async function resolveSheet(urls) {
-  try {
-    const remote = await getModelUrls()
-    if (!remote || typeof remote !== 'object') return urls
-    const next = { ...urls }
-    for (const id of ITEMS) {
-      if (typeof remote[id] === 'string') next[id] = normalizeUrl(remote[id])
-    }
-    return next
-  } catch (err) {
-    console.warn('No se pudieron leer los modelos de la hoja', err)
-    return urls
-  }
-}
-
-function readIdbRecord(id, url) {
-  try {
-    const savedUrl = localStorage.getItem(storageKey(id, 'url'))
-    const name = localStorage.getItem(storageKey(id, 'idb'))
-    const metaRaw = localStorage.getItem(storageKey(id, 'meta'))
-    if (savedUrl !== url || !name || !metaRaw) return null
-    return { name, metadata: JSON.parse(metaRaw) }
-  } catch {
-    return null
-  }
-}
-
-function rememberWeight(base, weightUrl) {
-  const bag = window.__eppWeights || (window.__eppWeights = {})
-  const list = bag[base] || (bag[base] = [])
-  if (!list.includes(weightUrl)) list.push(weightUrl)
-}
-
-function abortModelFetches(url) {
-  abortUrl(url + 'model.json')
-  abortUrl(url + 'metadata.json')
-  for (const weightUrl of window.__eppWeights?.[url] || []) abortUrl(weightUrl)
-}
-
-function getBodyReadyWait() {
-  if (!bodyReadyWait) {
+function waitFor(id) {
+  if (!itemWaits.has(id)) {
     let resolve
-    let reject
-    const promise = new Promise((res, rej) => {
-      resolve = res
-      reject = rej
-    })
-    bodyReadyWait = { promise, resolve, reject }
+    const promise = new Promise(r => { resolve = r })
+    itemWaits.set(id, { promise, resolve })
   }
-  return bodyReadyWait
+  return itemWaits.get(id)
 }
 
-function announceBodyReady(wanted) {
-  if (progress.ready) return
-  const needed = BODY_ITEMS.filter(id => wanted.has(id))
-  if (needed.some(id => !getModel(id))) return
-  const handsPending = wanted.has('guantes') && !getModel('guantes')
-  progress = {
-    ...progress,
-    ready: true,
-    handsReady: !handsPending,
-    stage: handsPending ? 'gpu' : 'listo',
-  }
-  emit()
-  console.info('[epp-model]', JSON.stringify({
-    phase: 'cuerpo-listo',
-    at: Math.round(performance.now() - startedAt),
-    handsPending,
-  }))
-  getBodyReadyWait().resolve(resolved)
+export function whenItemReady(id) {
+  if (isItemReady(id)) return Promise.resolve()
+  preloadModels()
+  return waitFor(id).promise
 }
 
-async function runPreload() {
+async function run() {
   startedAt = performance.now()
-  const initial = configUrls()
-  resolved = { ...initial }
-  const wanted = new Map(ITEMS.filter(id => initial[id]).map(id => [id, initial[id]]))
-  const hits = []
-  const misses = []
-  for (const [id, url] of wanted) {
-    const record = readIdbRecord(id, url)
-    if (record) hits.push({ id, url, record })
-    else misses.push({ id, url })
-  }
-  for (const { url } of misses) prefetch(url)
-  for (const { url } of hits) abortModelFetches(url)
-  progress = {
-    loaded: 0,
-    total: wanted.size,
-    warmed: 0,
-    ready: false,
-    stage: 'red',
-    models: Object.fromEntries([...wanted.keys()].map(id => [id, {
-      phase: hits.some(hit => hit.id === id) ? 'descargado' : 'descargando',
-      at: 0,
-      source: hits.some(hit => hit.id === id) ? 'idb' : 'network',
-    }])),
-  }
-  emit()
-  console.info('[epp-model]', JSON.stringify({
-    phase: 'inicio',
-    total: wanted.size,
-    ids: [...wanted.keys()],
-    cache: hits.map(hit => hit.id),
-    network: misses.map(miss => miss.id),
-  }))
+  const firstEntry = manifest.items[FIRST]
+  const baseEntry = manifest.bases[firstEntry.base]
+  log({ phase: 'inicio', items: ORDER, base: firstEntry.base, idb: inIdb(baseEntry) })
+  // Primero lo que necesita el primer paso (extractor + casco); el resto después.
+  if (!inIdb(baseEntry)) download(baseEntry)
+  if (!inIdb(firstEntry)) download(firstEntry)
 
-  const tf = await bootTf()
-  const tm = window.tmImage
+  const tf = await loadTf()
+  tfRef = tf
+  let ok = false
+  try { ok = await tf.setBackend('webgl') } catch (err) { console.warn('WebGL no disponible', err) }
+  if (!ok) await tf.setBackend('cpu')
+  await tf.ready()
+  log({ phase: 'tf', backend: tf.getBackend(), version: tf.version?.tfjs })
+  setProgress({ stage: 'red' })
 
-  const bundles = new Map()
-  const bodyMisses = misses.filter(({ id }) => BODY_ITEMS.includes(id))
-  const handMisses = misses.filter(({ id }) => !BODY_ITEMS.includes(id))
-  const handDownloads = Promise.all(handMisses.map(async ({ id, url }) => {
-    const bundle = await prefetch(url)
-    bundles.set(id, bundle)
-    mark(id, 'descargado', { source: 'network' })
-  }))
-  if (bodyMisses.length) {
-    await Promise.all(bodyMisses.map(async ({ id, url }) => {
-      const bundle = await prefetch(url)
-      bundles.set(id, bundle)
-      mark(id, 'descargado', { source: 'network' })
-    }))
+  const others = ORDER.filter(id => id !== FIRST)
+  const ensureBase = async (baseId) => {
+    if (bases.has(baseId)) return bases.get(baseId)
+    const entry = manifest.bases[baseId]
+    const { model, source } = await buildLayers(tf, entry)
+    log({ phase: 'base-cargado', source })
+    setProgress({ stage: 'gpu' })
+    await warmBase(tf, model)
+    bases.set(baseId, model)
+    log({ phase: 'base-listo', source })
+    if (source === 'network') persist(entry, model)
+    return model
   }
-  progress = { ...progress, stage: 'gpu', warmed: 0 }
-  emit()
-  console.info('[epp-model]', JSON.stringify({ phase: 'bytes', at: Math.round(performance.now() - startedAt) }))
-
-  const built = []
-  async function buildOne(id, url) {
-    mark(id, 'preparando', { source: hits.some(hit => hit.id === id) ? 'idb' : 'network' })
-    const record = hits.find(hit => hit.id === id && hit.url === url)?.record
-    let model
-    let layers = null
-    let metadata = null
-    let source = 'network'
-    if (record) {
-      layers = await tf.loadLayersModel(record.name)
-      metadata = record.metadata
-      model = new tm.CustomMobileNet(layers, metadata)
-      source = 'idb'
-    } else {
-      const bundle = bundles.get(id)
-      try {
-        layers = await layersFromBundle(tf, bundle)
-      } catch (err) {
-        console.warn('[epp-model] fromMemory falló, se carga desde la URL', id, err)
-        layers = await tf.loadLayersModel(url + 'model.json')
-      }
-      metadata = bundle.metadata
-      model = new tm.CustomMobileNet(layers, metadata)
-    }
-    memory.set(url, model)
-    if (engineCompileOnly) {
-      try { tf.env().set('ENGINE_COMPILE_ONLY', true) } catch {}
-    }
-    await warmup(model)
-    if (engineCompileOnly) {
-      try { tf.env().set('ENGINE_COMPILE_ONLY', false) } catch {}
-    }
-    built.push({ id, url, model, layers: source === 'network' ? layers : null, metadata, source })
-    progress = { ...progress, warmed: built.length }
-    mark(id, source === 'idb' ? 'cache' : 'listo', { source })
+  const buildItem = async (id) => {
+    const entry = manifest.items[id]
+    await ensureBase(entry.base)
+    const { model, source } = await buildLayers(tf, entry)
+    await warmHead(tf, model)
+    heads.set(id, { model, labels: entry.labels, base: entry.base })
+    if (source === 'network') persist(entry, model)
+    log({ id, phase: 'listo', source })
+    const itemsReady = { ...progress.itemsReady, [id]: true }
+    const allReady = ORDER.every(item => itemsReady[item])
+    setProgress({
+      itemsReady,
+      ready: Boolean(itemsReady[FIRST]),
+      handsReady: !manifest.items.guantes || Boolean(itemsReady.guantes),
+      allReady,
+      stage: allReady ? 'listo' : progress.stage,
+    })
+    waitFor(id).resolve()
   }
 
-  for (const [id, url] of wanted) {
-    if (!url || !BODY_ITEMS.includes(id)) continue
-    await buildOne(id, url)
-    announceBodyReady(wanted)
-  }
-  announceBodyReady(wanted)
-
-  try {
-    await handDownloads
-    for (const [id, url] of wanted) {
-      if (!url || BODY_ITEMS.includes(id)) continue
-      await buildOne(id, url)
-    }
-  } catch (err) {
-    console.warn('[epp-model] no se pudo preparar el modelo de guantes', err)
-    if (wanted.has('guantes')) mark('guantes', 'error')
-    progress = { ...progress, handsReady: false }
-    emit()
-  }
-
-  const handsReady = !wanted.has('guantes') || Boolean(getModel('guantes'))
-  progress = { ...progress, ready: true, handsReady, stage: 'listo' }
-  emit()
-  console.info('[epp-model]', JSON.stringify({
-    phase: 'listos',
-    at: Math.round(performance.now() - startedAt),
-    models: progress.models,
-  }))
-  getBodyReadyWait().resolve(resolved)
-
-  // Después de listos, para no competir con la descarga ni la GPU.
-  resolveSheet(initial).then(sheet => {
-    const diffs = {}
-    for (const id of ITEMS) {
-      const remote = (sheet[id] || '').trim()
-      const local = wanted.get(id) || ''
-      if (remote && remote !== local) diffs[id] = remote
-    }
-    if (Object.keys(diffs).length) {
-      console.info('[epp-model]', JSON.stringify({ phase: 'hoja-diferente', diffs }))
-    }
-  }).catch(() => {})
-
-  const toSave = built.filter(item => item.source === 'network' && item.layers)
-  Promise.all(toSave.map(item => persist(tf, item.id, item.url, item.layers, item.metadata))).catch(err => {
-    console.warn('No se pudieron guardar los modelos en el navegador', err)
-  })
-  return resolved
+  await buildItem(FIRST)
+  log({ phase: 'primero-listo', id: FIRST })
+  for (const id of others) if (!inIdb(manifest.items[id])) download(manifest.items[id])
+  for (const id of others) await buildItem(id)
+  log({ phase: 'listos' })
 }
 
-/** Empieza las tres descargas juntas en cuanto arranca la app. No vuelve a bajar los mismos URL. */
-/** Resuelve cuando los modelos de cuerpo (casco, lentes, chaleco) ya están listos.
- *  El de guantes puede seguir calentándose en segundo plano. */
+let runPromise = null
 export function preloadModels() {
-  const wait = getBodyReadyWait()
-  if (!preloadPromise) {
-    preloadPromise = runPreload().catch(err => {
-      preloadPromise = null
-      const pending = bodyReadyWait
-      bodyReadyWait = null
-      pending?.reject(err)
+  if (!started) {
+    started = true
+    runPromise = run().catch(err => {
+      console.error('[epp-model] error', err)
+      setProgress({ stage: 'error', error: String(err?.message || err) })
+      started = false
       throw err
     })
   }
-  return wait.promise
+  return runPromise
 }
+
+/**
+ * Probabilidades de cada pieza pedida sobre el cuadro actual.
+ * El extractor corre una sola vez por cuadro; luego cada cabeza.
+ * Devuelve { id: [{ className, probability }] } solo de las piezas listas.
+ */
+export async function predictItems(ids, image) {
+  const tf = tfRef
+  const ready = ids.filter(isItemReady)
+  if (!tf || !ready.length) return {}
+  const canvas = cropTo(image, 224, makeCanvas())
+  const outputs = tf.tidy(() => {
+    const byBase = new Map()
+    return ready.map(id => {
+      const head = heads.get(id)
+      if (!byBase.has(head.base)) byBase.set(head.base, bases.get(head.base).predict(toInput(tf, canvas)))
+      return head.model.predict(byBase.get(head.base))
+    })
+  })
+  try {
+    const values = await Promise.all(outputs.map(t => t.data()))
+    const result = {}
+    ready.forEach((id, i) => {
+      const labels = heads.get(id).labels
+      result[id] = Array.from(values[i]).map((probability, k) => ({ className: labels[k], probability }))
+    })
+    return result
+  } finally {
+    outputs.forEach(t => t.dispose())
+  }
+}
+
+// Arranca la descarga en cuanto se importa el módulo.
+if (typeof window !== 'undefined') preloadModels().catch(() => {})
+
+// Para pruebas desde la consola: window.__eppDebug.predictItems(['casco'], imagen)
+if (typeof window !== 'undefined') window.__eppDebug = { predictItems, progress: () => progress }

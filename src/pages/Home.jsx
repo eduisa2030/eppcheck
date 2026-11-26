@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getStats } from '../lib/stats'
-import { subscribeModelProgress } from '../lib/modelCache'
+import { modelStatusText, subscribeModelProgress } from '../lib/modelCache'
 
 export default function Home({ user, onNavigate }) {
   const [stats, setStats] = useState(getStats())
@@ -54,17 +54,9 @@ export default function Home({ user, onNavigate }) {
       <button onClick={() => onNavigate('scan')} className="w-full bg-gradient-to-b from-[#FFD65A] to-[#FFC21A] text-black font-semibold py-4 rounded-2xl mb-6">
         Escanear EPP
       </button>
-      {!modelProgress.ready ? (
-        <p className="text-center text-[#8A8A98] text-xs -mt-4 mb-6">
-          {modelProgress.stage === 'gpu'
-            ? `Preparando modelos en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
-            : (modelProgress.total
-              ? `Preparando modelos… ${modelProgress.loaded}/${modelProgress.total}`
-              : 'Preparando modelos…')}
-        </p>
-      ) : (!modelProgress.handsReady && modelProgress.models?.guantes) ? (
-        <p className="text-center text-[#8A8A98] text-xs -mt-4 mb-6">Listo para escanear. Preparando guantes…</p>
-      ) : null}
+      {modelStatusText(modelProgress) && (
+          <p className="text-center text-[#8A8A98] text-xs -mt-4 mb-6">{modelStatusText(modelProgress)}</p>
+        )}
 
       <div>
         <div className="flex justify-between mb-2 px-1">

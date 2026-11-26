@@ -183,18 +183,19 @@ export async function openCamera({ facing = 'user', previousDeviceId = null, swi
   return { stream, facing: info.facingMode || requested, deviceId: info.deviceId || deviceId }
 }
 
-/** Foto JPEG del cuadro actual del <video>. */
-export function captureVideoFrame(video, { mirrored = false, quality = 0.85 } = {}) {
+/** Foto JPEG del cuadro actual del <video>. maxSize limita el lado mayor (para guardar en el teléfono). */
+export function captureVideoFrame(video, { mirrored = false, quality = 0.85, maxSize = 0 } = {}) {
   if (!video || !video.videoWidth || !video.videoHeight) return null
+  const scale = maxSize ? Math.min(1, maxSize / Math.max(video.videoWidth, video.videoHeight)) : 1
   const canvas = document.createElement('canvas')
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
+  canvas.width = Math.round(video.videoWidth * scale)
+  canvas.height = Math.round(video.videoHeight * scale)
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
   if (mirrored) {
     ctx.translate(canvas.width, 0)
     ctx.scale(-1, 1)
   }
-  ctx.drawImage(video, 0, 0)
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
   return canvas.toDataURL('image/jpeg', quality)
 }

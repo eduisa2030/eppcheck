@@ -1,6 +1,5 @@
-import { ITEMS } from './models'
 import { CLASS_BIAS, SMOOTHING } from './config'
-import { activeModelIds, getModel, hasActiveModel, preloadModels } from './modelCache'
+import { activeModelIds, isItemReady, predictItems, preloadModels } from './modelCache'
 
 
 /**
@@ -116,42 +115,13 @@ export function modeledItems() {
   return activeModelIds()
 }
 
-/** Cumplimiento solo con los elementos que tienen modelo. */
-export function complianceFromResults(results) {
-  const tracked = modeledItems()
-  const analyzing = tracked.some(id => !results?.[id]?.status)
-  const missing = tracked.filter(id => {
-    const status = results?.[id]?.status
-    return status && status !== 'bien'
-  })
-  return {
-    analyzing,
-    missing,
-    cumple: !analyzing && tracked.length > 0 && missing.length === 0,
-  }
-}
-
-export function snapshotResults(results) {
-  const details = { ...results }
-  for (const id of ITEMS) {
-    if (!hasActiveModel(id)) {
-      details[id] = { status: 'sin_modelo', conf: null, label: 'Sin modelo aún' }
-    }
-  }
-  return details
-}
-
-async function predictProbs(model, video) {
-  const predictions = await model.predict(video)
-  return probsFromPredictions(predictions)
-}
-
 /**
- * Carga los modelos y predice cada ~200 ms sobre el video ya abierto.
+ * Predice cada ~200 ms sobre el video ya abierto, solo las piezas que pide activeItems
+ * (en el flujo por partes, una sola). El extractor corre una vez por cuadro.
  * La cámara la maneja useCamera: al cambiar de lente solo se reemplaza
  * srcObject, este intervalo sigue siendo el único.
  */
-export function startDetection({ videoRef, onResults, onFrame, onModelError, onMessage, isFrozen, activeItems }) {
+export function startDetection({ videoRef, onResults, onFrame, onModelError, isFrozen, activeItems }) {
   let timer = null
   let stopped = false
   let busy = false
@@ -164,18 +134,18 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, onM
     if (stopped || isFrozen?.() || busy) return
     const video = videoRef?.current
     if (!video || !video.srcObject || video.readyState < 2 || !video.videoWidth) return
-    const ids = (activeItems ? activeItems() : modeledItems()).filter(id => getModel(id))
+    const ids = (activeItems ? activeItems() : modeledItems()).filter(isItemReady)
     if (!ids.length) return
     busy = true
     try {
       const now = Date.now()
+      const predictions = await predictItems(ids, video)
+      if (stopped || isFrozen?.()) return
       const out = {}
       for (const id of ids) {
+        if (!predictions[id]) continue
         if (!states[id]) states[id] = { history: [], status: null, conf: 0 }
-        const probs = await predictProbs(getModel(id), video)
-        if (stopped || isFrozen?.()) return
-        applySmoothing(states[id], probs, now, smooth)
-        if (states[id].status == null && states[id].pBien == null) continue
+        applySmoothing(states[id], probsFromPredictions(predictions[id]), now, smooth)
         out[id] = {
           status: states[id].status,
           conf: +states[id].conf.toFixed(2),
@@ -193,27 +163,17 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, onM
     }
   }
 
-  ;(async () => {
-    try {
-      await preloadModels()
-      if (!stopped) onMessage?.('')
-    } catch (err) {
-      console.error(err)
-      if (!stopped) onModelError('No se pudieron cargar los modelos de detección.')
-      return
-    }
-
-    if (stopped) return
-    timer = setInterval(tick, smooth.loopMs)
-  })()
-
-  function cleanup() {
-    stopped = true
-    if (timer) clearInterval(timer)
-  }
+  preloadModels().catch(err => {
+    console.error(err)
+    if (!stopped) onModelError?.('No se pudieron cargar los modelos de detección.')
+  })
+  timer = setInterval(tick, smooth.loopMs)
 
   return {
-    stop: cleanup,
+    stop() {
+      stopped = true
+      if (timer) clearInterval(timer)
+    },
     resetItem(id) {
       delete states[id]
     },

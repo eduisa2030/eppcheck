@@ -28,7 +28,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0B0B12] text-white max-w-md mx-auto relative">
       {page === 'home' && <Home user={user} onNavigate={setPage} />}
-      {page === 'scan' && <Scan onBack={() => setPage('home')} />}
+      {page === 'scan' && <Scan user={user} onBack={() => setPage('home')} />}
       {page === 'history' && <History onBack={() => setPage('home')} />}
       {page === 'reports' && <Reports onBack={() => setPage('home')} />}
       {page === 'alerts' && <Alerts onBack={() => setPage('home')} />}
@@ -37,7 +37,7 @@ export default function App() {
       {page === 'settings' && <Settings onBack={() => setPage('home')} />}
       {page === 'capture' && <Capture onBack={() => setPage('home')} />}
 
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto h-[92px] bg-gradient-to-t from-[#0C0C14] via-[#0C0C14]/95 to-transparent border-t border-white/5 flex items-start justify-around pt-3 pb-6 px-2 z-50">
+      {page !== 'scan' && <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto h-[92px] bg-gradient-to-t from-[#0C0C14] via-[#0C0C14]/95 to-transparent border-t border-white/5 flex items-start justify-around pt-3 pb-6 px-2 z-50">
         <Tab icon="home" label="Inicio" active={page==='home'} onClick={() => setPage('home')} />
         <Tab icon="history" label="Historial" active={page==='history'} onClick={() => setPage('history')} />
         <div className="relative -mt-5">
@@ -47,7 +47,7 @@ export default function App() {
         </div>
         <Tab icon="chart" label="Reportes" active={page==='reports'} onClick={() => setPage('reports')} />
         <Tab icon="user" label="Perfil" active={page==='profile'} onClick={() => setPage('profile')} />
-      </nav>
+      </nav>}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { login } from '../lib/api'
-import { subscribeModelProgress } from '../lib/modelCache'
+import { modelStatusText, subscribeModelProgress } from '../lib/modelCache'
 import { version } from '../../package.json'
 
 export default function Login({ onLogin }) {
@@ -72,17 +72,9 @@ export default function Login({ onLogin }) {
           </button>
         </form>
         <p className="text-center text-[#8A8A98] text-xs mt-8">versión {version}</p>
-        {!modelProgress.ready ? (
-          <p className="text-center text-[#8A8A98] text-xs mt-2">
-            {modelProgress.stage === 'gpu'
-              ? `Preparando modelos en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
-              : (modelProgress.total
-                ? `Preparando modelos… ${modelProgress.loaded}/${modelProgress.total}`
-                : 'Preparando modelos…')}
-          </p>
-        ) : (!modelProgress.handsReady && modelProgress.models?.guantes) ? (
-          <p className="text-center text-[#8A8A98] text-xs mt-2">Listo para escanear. Preparando guantes…</p>
-        ) : null}
+        {modelStatusText(modelProgress) && (
+          <p className="text-center text-[#8A8A98] text-xs mt-2">{modelStatusText(modelProgress)}</p>
+        )}
       </div>
     </div>
   )

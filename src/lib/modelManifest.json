@@ -1,0 +1,70 @@
+{
+  "bases": {
+    "base-6448991083": {
+      "model": "models/base-6448991083/model.json",
+      "weights": "models/base-6448991083/model.bin",
+      "bytes": 1640832,
+      "hash": "302e1010a79841e66694f6c0d1045230"
+    }
+  },
+  "items": {
+    "casco": {
+      "tm": "CipT7kvYx",
+      "base": "base-6448991083",
+      "model": "models/CipT7kvYx/head-691ce3f2e6.json",
+      "weights": "models/CipT7kvYx/head-691ce3f2e6.bin",
+      "bytes": 513600,
+      "hash": "691ce3f2e68575b0de0537f259cc7cd1",
+      "labels": [
+        "Bien puesto",
+        "mal puesto",
+        "sin poner "
+      ],
+      "imageSize": 224,
+      "grayscale": false
+    },
+    "lentes": {
+      "tm": "JpOoTGgap",
+      "base": "base-6448991083",
+      "model": "models/JpOoTGgap/head-d1cde9c305.json",
+      "weights": "models/JpOoTGgap/head-d1cde9c305.bin",
+      "bytes": 513200,
+      "hash": "d1cde9c30547820afc88937adabe9577",
+      "labels": [
+        "LENTES",
+        "NO PUESTO"
+      ],
+      "imageSize": 224,
+      "grayscale": false
+    },
+    "chaleco": {
+      "tm": "Lmhs4iwPb",
+      "base": "base-6448991083",
+      "model": "models/Lmhs4iwPb/head-79c4324b46.json",
+      "weights": "models/Lmhs4iwPb/head-79c4324b46.bin",
+      "bytes": 513600,
+      "hash": "79c4324b46cea8b87962c49a8300b776",
+      "labels": [
+        "Bien puesto",
+        "Mal puesto",
+        "Sin poner "
+      ],
+      "imageSize": 224,
+      "grayscale": false
+    },
+    "guantes": {
+      "tm": "YLkRIfGZJ",
+      "base": "base-6448991083",
+      "model": "models/YLkRIfGZJ/head-1e48eef25f.json",
+      "weights": "models/YLkRIfGZJ/head-1e48eef25f.bin",
+      "bytes": 513200,
+      "hash": "1e48eef25f2f8dce06904e45d2bf3bbe",
+      "labels": [
+        "Sin guantes",
+        "Con guantes"
+      ],
+      "imageSize": 224,
+      "grayscale": false
+    }
+  }
+}
