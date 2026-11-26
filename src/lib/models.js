@@ -3,7 +3,7 @@ export const ITEM_CLASSES = {
   casco:   { bien: 'Bien puesto', mal: 'Mal puesto', sin: 'Sin casco' },
   lentes:  { bien: 'Bien puestos', mal: 'En mal estado', sin: 'Sin lentes' },
   chaleco: { bien: 'Bien puesto', mal: 'Mal puesto', sin: 'Sin chaleco' },
-  guantes: { bien: 'Bien puestos', mal: 'Deteriorados', sin: 'Sin guantes' },
+  guantes: { bien: 'Con guantes', mal: 'Mal puestos', sin: 'Sin guantes' },
 }
 
 export const BODY_ITEMS = ['casco', 'lentes', 'chaleco']

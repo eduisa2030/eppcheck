@@ -13,9 +13,9 @@ import { activeModelIds, getModel, hasActiveModel, preloadModels } from './model
  * "NO PUESTO" contiene el texto "puesto", así que se resuelve antes
  * de esa búsqueda. Lentes anteriores ("LENTES BIEN", "LENTES MAL", "NADA")
  * siguen valiendo: NADA es "sin poner".
- * Guantes (0RisIVP3D): "Guantes bien puestos" es bien, "Guantes deteriorados" es mal.
- * Este modelo no tiene clase "sin guantes".
- * Modelos anteriores: "Con guantes" es bien, "Sin guantes" es sin, "Mal Puesto" es mal.
+ * Guantes (YLkRIfGZJ): "Con guantes" es bien, "Sin guantes" es sin.
+ * Este modelo no tiene clase de mal puesto o deteriorados.
+ * Modelos anteriores: "Guantes bien puestos" es bien, "Guantes deteriorados" es mal, "Mal Puesto" es mal.
  */
 export function mapLabel(label) {
   const n = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ')
