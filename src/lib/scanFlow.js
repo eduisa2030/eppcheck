@@ -104,13 +104,32 @@ function enterShot(state, shotIndex, photos, now) {
   }
 }
 
-/** Guarda la foto de la toma actual. Si hay otra toma, avanza; si no, cierra el escaneo. */
+/** Congela el estado actual de la toma: «bien» queda bien; el resto, no validado. */
+export function freezeShotItems(state) {
+  const final = { ...state.final }
+  const locked = { ...state.locked }
+  const live = { ...state.live }
+  for (const id of state.items || []) {
+    const current = live[id] || final[id]
+    const raw = current?.status
+    const status = raw === 'bien' || raw === 'mal' || raw === 'sin' ? raw : 'no_detectado'
+    const conf = status === 'no_detectado' ? 0 : (current?.conf ?? 0)
+    final[id] = { status, conf, locked: status === 'bien' }
+    live[id] = { status, conf }
+    if (status === 'bien') locked[id] = true
+    else delete locked[id]
+  }
+  return { ...state, final, locked, live }
+}
+
+/** Guarda la foto y el estado de la toma actual. Si hay otra toma, avanza; si no, cierra el escaneo. */
 export function captureShot(state, photo, now) {
-  if (!state || state.phase !== 'ready') return state
-  const photos = { ...(state.photos || {}) }
-  if (state.shot) photos[state.shot] = photo || null
-  if (hasNextShot(state)) return enterShot(state, state.shotIndex + 1, photos, now)
-  return { ...state, phase: 'done', notice: '', photos }
+  if (!state || state.phase === 'done' || state.phase === 'timeout') return state
+  const frozen = freezeShotItems(state)
+  const photos = { ...(frozen.photos || {}) }
+  if (frozen.shot) photos[frozen.shot] = photo || null
+  if (hasNextShot(frozen)) return enterShot(frozen, frozen.shotIndex + 1, photos, now)
+  return { ...frozen, phase: 'done', notice: '', photos }
 }
 
 function enterStep(state, index, now, notice) {

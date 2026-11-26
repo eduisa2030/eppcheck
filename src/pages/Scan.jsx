@@ -128,7 +128,7 @@ export default function Scan({ onBack, user }) {
 
   const handleCapture = () => {
     const current = flowRef.current
-    if (current?.phase !== 'ready' || !isScanValidated(current)) return
+    if (!current || current.phase === 'done' || current.phase === 'timeout') return
     const photo = captureVideoFrame(videoRef.current, { mirrored })
     const next = captureShot(current, photo, Date.now())
     if (next.phase === 'done') {
@@ -235,7 +235,7 @@ export default function Scan({ onBack, user }) {
     if (isScanValidated(flow)) {
       headline = 'VALIDADO'
       subtitle = hasNextShot(flow)
-        ? 'Presiona Capturar y luego acerca las manos'
+        ? 'Presiona Capturar y seguir, o espera a validar'
         : 'Presiona Capturar para registrar'
       tone = 'ok'
     } else {
@@ -348,13 +348,12 @@ export default function Scan({ onBack, user }) {
         </div>
       </div>
 
-      {flow.phase === 'ready' && (
+      {!finished && !timedOut && !loadingModels && !cameraError && !modelError && (
         <div className="px-5 pt-4 pb-8 flex flex-col gap-2">
           <button
             type="button"
             onClick={handleCapture}
-            disabled={!isScanValidated(flow)}
-            className="w-full bg-gradient-to-b from-[#FFE07A] to-[#FFC21A] text-black font-semibold py-5 rounded-2xl text-lg disabled:opacity-40 disabled:pointer-events-none"
+            className="w-full bg-gradient-to-b from-[#FFE07A] to-[#FFC21A] text-black font-semibold py-5 rounded-2xl text-lg"
           >
             {hasNextShot(flow) ? 'Capturar y seguir' : 'Capturar'}
           </button>
