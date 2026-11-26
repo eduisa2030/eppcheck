@@ -87,24 +87,50 @@ export async function videoInputs() {
   return devices.filter(device => device.kind === 'videoinput' && device.deviceId)
 }
 
+/** 1280×720 a ~30 fps: bastante detalle para modelos de 224 px, habitual en teléfonos. */
+export const CAMERA_IDEAL = {
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+  frameRate: { ideal: 30 },
+}
+
+function isOverconstrained(err) {
+  return err?.name === 'OverconstrainedError' || err?.name === 'ConstraintNotSatisfiedError'
+}
+
+async function getUserMediaVideo(video) {
+  return navigator.mediaDevices.getUserMedia({ video, audio: false })
+}
+
 async function getFacingStream(facing) {
-  return navigator.mediaDevices.getUserMedia({
-    video: { facingMode: facing },
-    audio: false,
-  })
+  try {
+    return await getUserMediaVideo({ facingMode: facing, ...CAMERA_IDEAL })
+  } catch (err) {
+    if (isOverconstrained(err)) {
+      return getUserMediaVideo({ facingMode: facing })
+    }
+    throw err
+  }
 }
 
 async function getDeviceStream(deviceId) {
+  const withIdeal = { deviceId: { exact: deviceId }, ...CAMERA_IDEAL }
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: deviceId } },
-      audio: false,
-    })
-  } catch {
-    return navigator.mediaDevices.getUserMedia({
-      video: { deviceId },
-      audio: false,
-    })
+    return await getUserMediaVideo(withIdeal)
+  } catch (err) {
+    if (isOverconstrained(err)) {
+      try {
+        return await getUserMediaVideo({ deviceId: { exact: deviceId } })
+      } catch {
+        return getUserMediaVideo({ deviceId })
+      }
+    }
+    try {
+      return await getUserMediaVideo({ deviceId, ...CAMERA_IDEAL })
+    } catch (err2) {
+      if (isOverconstrained(err2)) return getUserMediaVideo({ deviceId })
+      throw err2
+    }
   }
 }
 
@@ -141,7 +167,13 @@ export async function openCamera({ facing = 'user', previousDeviceId = null, swi
   })
   if (!deviceId) {
     if (switching) throw facingError || new Error('No se pudo cambiar de cámara')
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    let stream
+    try {
+      stream = await getUserMediaVideo({ ...CAMERA_IDEAL })
+    } catch (err) {
+      if (!isOverconstrained(err)) throw err
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    }
     const info = trackFacing(stream)
     return { stream, facing: info.facingMode || requested, deviceId: info.deviceId }
   }

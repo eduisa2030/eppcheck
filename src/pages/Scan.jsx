@@ -7,8 +7,18 @@ import { activeModelIds, hasActiveModel, subscribeModelProgress } from '../lib/m
 import { complianceFromResults, modeledItems, snapshotResults, startDetection } from '../lib/detect'
 import { activeScanItems, armScan, captureShot, hasNextShot, initialScan, isScanValidated, reduceScan, shotTitle, stepPrompt } from '../lib/scanFlow'
 import { captureVideoFrame } from '../lib/camera'
+import { SMOOTHING } from '../lib/config'
 import { useCamera } from '../lib/useCamera'
 import CameraSwitchButton from '../components/CameraSwitchButton'
+
+function confidenceColor(pBien, threshold = SMOOTHING.onThreshold) {
+  const t = Math.max(0, Math.min(1, Number(pBien) / threshold))
+  const from = t < 0.5 ? [248, 113, 113] : [251, 191, 36]
+  const to = t < 0.5 ? [251, 191, 36] : [52, 211, 153]
+  const u = t < 0.5 ? t * 2 : (t - 0.5) * 2
+  const rgb = from.map((channel, i) => Math.round(channel + (to[i] - channel) * u))
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
+}
 
 export default function Scan({ onBack, user }) {
   const videoRef = useRef(null)
@@ -334,14 +344,38 @@ export default function Scan({ onBack, user }) {
             const markClass = !status || status === 'no_detectado'
               ? 'bg-white/10 text-[#8A8A98]'
               : `text-black ${badge(status)}`
+            const pBien = live?.pBien
+            const showBar = watching && !finished && !timedOut && pBien != null
+            const bienPct = showBar ? Math.round(Math.max(0, Math.min(1, pBien)) * 100) : null
+            const barColor = showBar ? confidenceColor(pBien) : null
             return (
-              <div key={item} className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${markClass}`}>
-                  {mark}
+              <div key={item}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${markClass}`}>
+                    {mark}
+                  </div>
+                  <span className="capitalize flex-1 text-sm">{item}</span>
+                  <span className="text-xs text-[#C8C8D0]">{label}</span>
+                  <span className="text-[11px] w-8 text-right text-[#8A8A98]">{conf == null || status === 'no_detectado' ? '—' : `${Math.round(conf * 100)}%`}</span>
                 </div>
-                <span className="capitalize flex-1 text-sm">{item}</span>
-                <span className="text-xs text-[#C8C8D0]">{label}</span>
-                <span className="text-[11px] w-8 text-right text-[#8A8A98]">{conf == null || status === 'no_detectado' ? '—' : `${Math.round(conf * 100)}%`}</span>
+                {showBar && (
+                  <div className="mt-1.5 ml-8">
+                    <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${bienPct}%`,
+                          backgroundColor: barColor,
+                          transition: 'width 200ms linear, background-color 200ms linear',
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-between gap-2 mt-1">
+                      <span className="text-[11px] text-[#C8C8D0] truncate">{status ? label : 'Analizando…'}</span>
+                      <span className="text-[11px] font-semibold tabular-nums" style={{ color: barColor }}>{bienPct}%</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

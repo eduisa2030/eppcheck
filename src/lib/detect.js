@@ -74,16 +74,17 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
   const cutoff = now - smooth.windowMs
   state.history = state.history.filter(sample => sample.t >= cutoff)
 
+  const avgBien = mean(state.history.map(sample => sample.bien))
+  const avgMal = mean(state.history.map(sample => sample.mal))
+  const avgSin = mean(state.history.map(sample => sample.sin))
+  state.pBien = avgBien
+
   // Los primeros cuadros, antes de llenar la ventana, no fijan ni muestran estado.
   if (now - state.firstT < smooth.windowMs) {
     state.status = null
     state.conf = 0
     return state
   }
-
-  const avgBien = mean(state.history.map(sample => sample.bien))
-  const avgMal = mean(state.history.map(sample => sample.mal))
-  const avgSin = mean(state.history.map(sample => sample.sin))
 
   let status = state.status
   if (status === 'bien') {
@@ -171,10 +172,11 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, onM
         const probs = await predictProbs(getModel(id), video)
         if (stopped || isFrozen?.()) return
         applySmoothing(states[id], probs, now, smooth)
-        if (!states[id].status) continue
+        if (states[id].status == null && states[id].pBien == null) continue
         out[id] = {
           status: states[id].status,
           conf: +states[id].conf.toFixed(2),
+          pBien: +(states[id].pBien || 0).toFixed(2),
         }
       }
       if (!stopped && !isFrozen?.() && listener && Object.keys(out).length) listener(out)

@@ -234,19 +234,21 @@ export function reduceScan(state, { predictions = {}, now }, flow = SCAN) {
   if (state.phase === 'done' || state.phase === 'timeout') return { state, resetIds: [] }
 
   let next = state
+  const live = { ...next.live }
+  for (const [id, pred] of Object.entries(predictions)) {
+    if (pred?.status || pred?.pBien != null) {
+      live[id] = { status: pred.status || live[id]?.status, conf: pred.conf ?? live[id]?.conf ?? 0, pBien: pred.pBien }
+    }
+  }
+  next = { ...next, live }
+
   if (!next.clockStarted) {
-    if (!Object.keys(predictions).length) return { state, resetIds: [] }
+    if (!Object.values(predictions).some(pred => pred?.status)) return { state: next, resetIds: [] }
     next = { ...next, clockStarted: true, startedAt: now, stepStartedAt: now }
   }
 
   // En ready el operador ya validó y puede tardar en pulsar Capturar.
   if (next.phase !== 'ready' && now - next.startedAt >= flow.scanTimeoutMs) return timeoutScan(next, now)
-
-  const live = { ...next.live }
-  for (const [id, pred] of Object.entries(predictions)) {
-    if (pred?.status) live[id] = { status: pred.status, conf: pred.conf }
-  }
-  next = { ...next, live }
 
   if (next.phase === 'verify' || next.phase === 'ready') {
     const sinConfidence = flow.sinConfidence ?? 0.75
