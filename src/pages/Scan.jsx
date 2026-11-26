@@ -12,6 +12,7 @@ import {
   capturePhoto,
   captureStep,
   currentItem,
+  glovePhase,
   initialScan,
   reduceScan,
   scanResult,
@@ -19,7 +20,7 @@ import {
   stepTitle,
 } from '../lib/scanFlow'
 import { captureVideoFrame } from '../lib/camera'
-import { SMOOTHING } from '../lib/config'
+import { GLOVES, SMOOTHING } from '../lib/config'
 import { useCamera } from '../lib/useCamera'
 import CameraSwitchButton from '../components/CameraSwitchButton'
 
@@ -160,7 +161,8 @@ export default function Scan({ onBack, user }) {
   const cumple = result?.cumple ?? false
   const currentId = currentItem(flow)
   const itemReady = currentId ? Boolean(modelProgress.itemsReady?.[currentId]) : true
-  const badge = s => s === 'bien' ? 'bg-emerald-500' : s === 'mal' ? 'bg-amber-500' : s === 'no_detectado' ? 'bg-white/10' : 'bg-red-500'
+  const badge = s => s === 'bien' ? 'bg-emerald-500' : s === 'mal' ? 'bg-amber-500' : s === 'no_detectado' || s === 'ninguno' ? 'bg-white/10' : 'bg-red-500'
+  const gPhase = glovePhase(flow)
   const labelFor = (id, status) => status === 'no_detectado'
     ? 'No detectado'
     : (ITEM_CLASSES[id]?.[status] || status)
@@ -188,11 +190,26 @@ export default function Scan({ onBack, user }) {
     headline = currentId.toUpperCase()
     if (!itemReady) subtitle = modelStatusText(modelProgress) || 'Preparando el modelo…'
     else if (!cameraReady) subtitle = 'Abriendo la cámara…'
+    else if (gPhase === 'pausa') subtitle = 'Acerca tus manos a la cámara…'
+    else if (gPhase === 'sin') subtitle = 'Paso 1 de 2: muestra tu mano SIN guante a la cámara. O presiona Capturar.'
+    else if (gPhase === 'con' && live?.status === 'bien' && (live?.pBien ?? 0) >= GLOVES.onThreshold) {
+      subtitle = '¡Bien! Mantén tus manos con guantes frente a la cámara…'
+      tone = 'ok'
+    } else if (gPhase === 'con') subtitle = 'Paso 2 de 2: ahora muestra tus manos CON guantes. Se valida sola, o presiona Capturar.'
     else if (live?.status === 'bien') {
       subtitle = 'Bien, quédate así un momento…'
       tone = 'ok'
     } else subtitle = `${stepPrompt(currentId)}. Se valida sola al detectarla, o presiona Capturar.`
   }
+
+  const livePBien = flow.phase === 'step' && currentId ? flow.live[currentId]?.pBien : null
+  const liveBar = livePBien != null && !cameraError && !modelError
+    ? {
+        pct: Math.round(Math.max(0, Math.min(1, livePBien)) * 100),
+        color: confidenceColor(livePBien, currentId === 'guantes' ? GLOVES.onThreshold : SMOOTHING.onThreshold),
+        label: ITEM_CLASSES[currentId]?.bien || 'bien',
+      }
+    : null
 
   const toneClass = tone === 'ok'
     ? 'bg-emerald-500/15 border border-emerald-500/30'
@@ -204,7 +221,7 @@ export default function Scan({ onBack, user }) {
 
   return (
     <div className="min-h-screen bg-[#0A0A0F] text-white flex flex-col pb-40">
-      <div className="relative mx-5 mt-5 rounded-3xl overflow-hidden bg-black" style={{ height: '36vh' }}>
+      <div className="scan-cam relative mx-5 mt-5 rounded-3xl overflow-hidden bg-black">
         <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${mirrored ? '-scale-x-100' : ''} ${shownPhoto ? 'invisible' : ''}`} />
         {shownPhoto && (
           <img src={shownPhoto} alt="Foto de evidencia" className="absolute inset-0 w-full h-full object-cover" />
@@ -231,6 +248,20 @@ export default function Scan({ onBack, user }) {
             )}
             <p className={`text-lg font-bold ${titleClass}`}>{headline}</p>
             {subtitle && <p className="text-xs mt-1 text-[#C8C8D0]">{subtitle}</p>}
+            {liveBar && (
+              <div className="mt-2.5 text-left">
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${liveBar.pct}%`, backgroundColor: liveBar.color, transition: 'width 200ms linear, background-color 200ms linear' }}
+                  />
+                </div>
+                <div className="flex justify-between gap-2 mt-1">
+                  <span className="text-[11px] text-[#C8C8D0] truncate">Confianza de «{liveBar.label}»</span>
+                  <span className="text-[11px] font-semibold tabular-nums" style={{ color: liveBar.color }}>{liveBar.pct}%</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -262,10 +293,6 @@ export default function Scan({ onBack, user }) {
               const markClass = !final
                 ? (isCurrent ? 'bg-[#FFC21A] text-black' : 'bg-white/10 text-[#8A8A98]')
                 : final.status === 'no_detectado' ? 'bg-white/10 text-[#8A8A98]' : `text-black ${badge(final.status)}`
-              const pBien = live?.pBien
-              const showBar = isCurrent && pBien != null
-              const bienPct = showBar ? Math.round(Math.max(0, Math.min(1, pBien)) * 100) : null
-              const barColor = showBar ? confidenceColor(pBien) : null
               return (
                 <div key={item}>
                   <div className="flex items-center gap-3">
@@ -276,20 +303,6 @@ export default function Scan({ onBack, user }) {
                       {final?.hora || (final ? '' : '—')}
                     </span>
                   </div>
-                  {showBar && (
-                    <div className="mt-1.5 ml-8">
-                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${bienPct}%`, backgroundColor: barColor, transition: 'width 200ms linear, background-color 200ms linear' }}
-                        />
-                      </div>
-                      <div className="flex justify-between gap-2 mt-1">
-                        <span className="text-[11px] text-[#C8C8D0] truncate">Confianza de «{ITEM_CLASSES[item]?.bien || 'bien'}»</span>
-                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: barColor }}>{bienPct}%</span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )
             })}

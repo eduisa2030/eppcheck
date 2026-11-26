@@ -15,9 +15,21 @@ import { activeModelIds, isItemReady, predictItems, preloadModels } from './mode
  * Guantes (YLkRIfGZJ): "Con guantes" es bien, "Sin guantes" es sin.
  * Este modelo no tiene clase de mal puesto o deteriorados.
  * Modelos anteriores: "Guantes bien puestos" es bien, "Guantes deteriorados" es mal, "Mal Puesto" es mal.
+ * Solo en guantes: una clase de fondo ("Sin manos", "Fondo", "Nada", "Ninguno", "Vacío"...)
+ * es "ninguno": no valida ni cuenta como sin guantes. Con el modelo de 2 clases nunca aparece.
  */
-export function mapLabel(label) {
-  const n = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ')
+export function normalizeLabel(label) {
+  return String(label || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+export function isBackgroundLabel(label) {
+  const n = normalizeLabel(label)
+  return /\b(sin manos?|no hay manos?|manos? no visibles?|fondo|nada|ningun[oa]?|vacio|background|sin persona)\b/.test(n)
+}
+
+export function mapLabel(label, item) {
+  if (item === 'guantes' && isBackgroundLabel(label)) return 'ninguno'
+  const n = normalizeLabel(label)
   if (n.includes('con guantes') || n === 'con guante') return 'bien'
   if (n.includes('deterior')) return 'mal'
   if (n.includes('no puesto')) return 'sin'
@@ -34,10 +46,10 @@ function mean(values) {
   return sum / values.length
 }
 
-export function rawProbsFromPredictions(predictions) {
-  const probs = { bien: 0, mal: 0, sin: 0 }
+export function rawProbsFromPredictions(predictions, item) {
+  const probs = { bien: 0, mal: 0, sin: 0, ninguno: 0 }
   for (const pred of predictions || []) {
-    const key = mapLabel(pred.className)
+    const key = mapLabel(pred.className, item)
     const probability = Number(pred.probability) || 0
     probs[key] = Math.max(probs[key], probability)
   }
@@ -49,15 +61,16 @@ export function preferSin(probs, bias = CLASS_BIAS) {
   const bien = probs.bien || 0
   const mal = probs.mal || 0
   const sin = probs.sin || 0
+  const ninguno = probs.ninguno || 0
   const topIsMal = mal >= bien && mal >= sin
   if (topIsMal && sin >= bias.sinOverMal && bien < bias.bienMaxWhenPreferSin) {
-    return { bien, mal: 0, sin: Math.max(sin, mal) }
+    return { bien, mal: 0, sin: Math.max(sin, mal), ninguno }
   }
-  return { bien, mal, sin }
+  return { bien, mal, sin, ninguno }
 }
 
-export function probsFromPredictions(predictions, bias = CLASS_BIAS) {
-  return preferSin(rawProbsFromPredictions(predictions), bias)
+export function probsFromPredictions(predictions, bias = CLASS_BIAS, item) {
+  return preferSin(rawProbsFromPredictions(predictions, item), bias)
 }
 
 /**
@@ -72,6 +85,7 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
     bien: probs.bien,
     mal: probs.mal,
     sin: probs.sin,
+    ninguno: probs.ninguno || 0,
   })
   const cutoff = now - smooth.windowMs
   state.history = state.history.filter(sample => sample.t >= cutoff)
@@ -79,7 +93,10 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
   const avgBien = mean(state.history.map(sample => sample.bien))
   const avgMal = mean(state.history.map(sample => sample.mal))
   const avgSin = mean(state.history.map(sample => sample.sin))
+  const avgNinguno = mean(state.history.map(sample => sample.ninguno || 0))
   state.pBien = avgBien
+  // Fondo (solo modelos con esa clase): gana si supera a mal y a sin.
+  const other = () => (avgNinguno > avgMal && avgNinguno > avgSin ? 'ninguno' : avgMal >= avgSin ? 'mal' : 'sin')
 
   // Los primeros cuadros, antes de llenar la ventana, no fijan ni muestran estado.
   if (now - state.firstT < smooth.windowMs) {
@@ -91,13 +108,13 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
   let status = state.status
   if (status === 'bien') {
     if (avgBien <= smooth.offThreshold) {
-      status = avgMal >= avgSin ? 'mal' : 'sin'
+      status = other()
     }
   } else if (avgBien >= smooth.onThreshold) {
     status = 'bien'
   } else {
-    const next = avgMal >= avgSin ? 'mal' : 'sin'
-    if (status !== 'mal' && status !== 'sin') {
+    const next = other()
+    if ((status !== 'mal' && status !== 'sin') || next === 'ninguno') {
       status = next
     } else if (next !== status) {
       const winner = Math.max(avgMal, avgSin)
@@ -107,7 +124,7 @@ export function applySmoothing(state, probs, now, smooth = SMOOTHING) {
   }
 
   state.status = status
-  state.conf = status === 'bien' ? avgBien : status === 'mal' ? avgMal : avgSin
+  state.conf = status === 'bien' ? avgBien : status === 'mal' ? avgMal : status === 'ninguno' ? avgNinguno : avgSin
   return state
 }
 
@@ -145,7 +162,7 @@ export function startDetection({ videoRef, onResults, onFrame, onModelError, isF
       for (const id of ids) {
         if (!predictions[id]) continue
         if (!states[id]) states[id] = { history: [], status: null, conf: 0 }
-        applySmoothing(states[id], probsFromPredictions(predictions[id]), now, smooth)
+        applySmoothing(states[id], probsFromPredictions(predictions[id], CLASS_BIAS, id), now, smooth)
         out[id] = {
           status: states[id].status,
           conf: +states[id].conf.toFixed(2),

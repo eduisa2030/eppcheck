@@ -27,3 +27,13 @@ export const SCAN = {
   latchMs: 1000,
 }
 
+
+// Guantes: el modelo de 2 clases da «Con guantes» a casi cualquier fondo.
+// Al entrar al paso se espera pauseMs (y se reinicia la ventana), se exige ver primero
+// la mano SIN guante (promedio de «sin» >= sinMin) y luego «con» >= onThreshold sostenido holdMs.
+export const GLOVES = {
+  pauseMs: 2000,
+  sinMin: 0.7,
+  onThreshold: 0.9,
+  holdMs: 2000,
+}
