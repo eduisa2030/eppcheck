@@ -5,7 +5,7 @@ import { vibrate, playBeep } from '../lib/feedback'
 import { ITEM_CLASSES, ITEMS } from '../lib/models'
 import { activeModelIds, hasActiveModel, subscribeModelProgress } from '../lib/modelCache'
 import { complianceFromResults, modeledItems, snapshotResults, startDetection } from '../lib/detect'
-import { activeScanItems, armScan, finishScan, initialScan, isScanValidated, reduceScan, stepPrompt } from '../lib/scanFlow'
+import { activeScanItems, armScan, captureShot, hasNextShot, initialScan, isScanValidated, reduceScan, shotTitle, stepPrompt } from '../lib/scanFlow'
 import { captureVideoFrame } from '../lib/camera'
 import { useCamera } from '../lib/useCamera'
 import CameraSwitchButton from '../components/CameraSwitchButton'
@@ -47,8 +47,9 @@ export default function Scan({ onBack, user }) {
     if (!progress.ready || flowRef.current?.clockStarted) return
     const items = activeModelIds()
     const current = flowRef.current
-    if (!current || current.items.join() === items.join()) return
-    const next = initialScan(items, Date.now())
+    const planned = initialScan(items, Date.now())
+    if (!current || (current.allItems || current.items).join() === planned.allItems.join()) return
+    const next = planned
     flowRef.current = next
     setFlow(next)
   }), [])
@@ -57,14 +58,17 @@ export default function Scan({ onBack, user }) {
     cameraReadyRef.current = cameraReady
   }, [cameraReady])
 
+  const shotReady = flow.shot === 'hands' ? !!modelProgress.handsReady : !!modelProgress.ready
+
   useEffect(() => {
-    if (!modelProgress.ready || !cameraReady || cameraError || modelError) return
     const current = flowRef.current
+    const ready = current?.shot === 'hands' ? !!modelProgress.handsReady : !!modelProgress.ready
+    if (!ready || !cameraReady || cameraError || modelError) return
     if (!current || current.clockStarted || current.phase === 'done' || current.phase === 'timeout') return
     const armed = armScan(current, Date.now())
     flowRef.current = armed
     setFlow(armed)
-  }, [modelProgress.ready, cameraReady, cameraError, modelError])
+  }, [modelProgress.ready, modelProgress.handsReady, cameraReady, cameraError, modelError, flow.shot, flow.phase, flow.clockStarted])
 
   useEffect(() => {
     const session = startDetection({
@@ -100,7 +104,8 @@ export default function Scan({ onBack, user }) {
     if (flow.phase !== 'done' || savingRef.current) return
     savingRef.current = true
     const view = {}
-    for (const id of flow.items) {
+    const tracked = flow.allItems || flow.items
+    for (const id of tracked) {
       const row = flow.final[id]
       view[id] = { status: row?.status || 'no_detectado', conf: row?.conf ?? 0 }
     }
@@ -125,8 +130,13 @@ export default function Scan({ onBack, user }) {
     const current = flowRef.current
     if (current?.phase !== 'ready' || !isScanValidated(current)) return
     const photo = captureVideoFrame(videoRef.current, { mirrored })
-    setCapturedPhoto(photo)
-    const next = finishScan(current)
+    const next = captureShot(current, photo, Date.now())
+    if (next.phase === 'done') {
+      setCapturedPhoto(photo)
+    } else {
+      setCapturedPhoto(null)
+      next.items.forEach(id => sessionRef.current?.resetItem(id))
+    }
     flowRef.current = next
     setFlow(next)
   }
@@ -135,7 +145,7 @@ export default function Scan({ onBack, user }) {
   const timedOut = flow.phase === 'timeout'
   const finalView = {}
   if (finished) {
-    for (const id of flow.items) {
+    for (const id of (flow.allItems || flow.items)) {
       const row = flow.final[id]
       finalView[id] = { status: row?.status || 'no_detectado', conf: row?.conf ?? 0 }
     }
@@ -145,7 +155,7 @@ export default function Scan({ onBack, user }) {
   const problemas = judged?.missing ?? []
   const criticos = problemas.filter(i => i === 'casco' || i === 'chaleco')
   const currentId = flow.items[flow.index]
-  const scanArmed = modelProgress.ready && cameraReady && !cameraError && !modelError
+  const scanArmed = shotReady && cameraReady && !cameraError && !modelError
   const loadingModels = !scanArmed && !cameraError && !modelError && !finished && !timedOut
 
   const sendNotification = async () => {
@@ -212,29 +222,35 @@ export default function Scan({ onBack, user }) {
     tone = cumple ? 'ok' : 'bad'
   } else if (loadingModels) {
     headline = 'CARGANDO'
-    subtitle = !modelProgress.ready
-      ? (modelProgress.stage === 'gpu'
-        ? `Preparando en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
-        : (modelProgress.total
-          ? `Cargando modelos… ${modelProgress.loaded}/${modelProgress.total}`
-          : 'Cargando modelos…'))
-      : 'Preparando cámara…'
+    subtitle = flow.shot === 'hands' && !modelProgress.handsReady
+      ? 'Preparando modelo de guantes…'
+      : (!modelProgress.ready
+        ? (modelProgress.stage === 'gpu'
+          ? `Preparando en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
+          : (modelProgress.total
+            ? `Cargando modelos… ${modelProgress.loaded}/${modelProgress.total}`
+            : 'Cargando modelos…'))
+        : 'Preparando cámara…')
   } else if (flow.phase === 'ready') {
     if (isScanValidated(flow)) {
       headline = 'VALIDADO'
-      subtitle = 'Presiona Capturar para registrar'
+      subtitle = hasNextShot(flow)
+        ? 'Presiona Capturar y luego acerca las manos'
+        : 'Presiona Capturar para registrar'
       tone = 'ok'
     } else {
       headline = 'MANTÉN EL EQUIPO'
-      subtitle = 'Se perdió la validación. Acércate de nuevo a la cámara.'
+      subtitle = flow.shot === 'hands'
+        ? 'Se perdió la validación. Acerca otra vez las manos a la cámara.'
+        : 'Se perdió la validación. Acércate de nuevo a la cámara.'
       tone = 'bad'
     }
   } else if (flow.phase === 'verify') {
     headline = 'VERIFICANDO'
     subtitle = flow.notice
   } else {
-    headline = currentId ? stepPrompt(currentId) : 'ESCANEO'
-    subtitle = flow.notice || 'Quédate frente a la cámara'
+    headline = currentId ? stepPrompt(currentId, flow.shot) : 'ESCANEO'
+    subtitle = flow.notice || (flow.shot === 'hands' ? 'Acerca tus manos con guantes a la cámara' : 'Quédate frente a la cámara')
   }
 
   const toneClass = tone === 'ok'
@@ -267,6 +283,9 @@ export default function Scan({ onBack, user }) {
 
       <div className="px-5 mt-4">
         <div className={`rounded-2xl py-4 px-4 text-center ${toneClass}`}>
+          {shotTitle(flow) && !finished && !timedOut && !cameraError && !modelError && (
+            <p className="text-[10px] tracking-widest text-[#8A8A98] mb-1">{shotTitle(flow)}</p>
+          )}
           <p className={`text-lg font-bold ${titleClass}`}>{headline}</p>
           <p className="text-xs mt-1 text-[#C8C8D0]">{subtitle}</p>
           {loadingModels && Object.keys(modelProgress.models || {}).length > 0 && (
@@ -300,8 +319,9 @@ export default function Scan({ onBack, user }) {
               )
             }
             const final = flow.final[item]
+            const inCurrentShot = flow.items.includes(item)
             const isCurrent = flow.phase === 'step' && currentId === item
-            const watching = isCurrent || flow.phase === 'verify' || flow.phase === 'ready'
+            const watching = inCurrentShot && (isCurrent || flow.phase === 'verify' || flow.phase === 'ready')
             const live = watching ? flow.live[item] : null
             const status = final?.status || live?.status
             const conf = final?.conf ?? live?.conf
@@ -336,7 +356,7 @@ export default function Scan({ onBack, user }) {
             disabled={!isScanValidated(flow)}
             className="w-full bg-gradient-to-b from-[#FFE07A] to-[#FFC21A] text-black font-semibold py-5 rounded-2xl text-lg disabled:opacity-40 disabled:pointer-events-none"
           >
-            Capturar
+            {hasNextShot(flow) ? 'Capturar y seguir' : 'Capturar'}
           </button>
           <button type="button" onClick={restart} className="w-full bg-white/5 text-white text-sm py-3.5 rounded-xl border border-white/10">
             Reiniciar escaneo

@@ -54,7 +54,7 @@ export default function Home({ user, onNavigate }) {
       <button onClick={() => onNavigate('scan')} className="w-full bg-gradient-to-b from-[#FFD65A] to-[#FFC21A] text-black font-semibold py-4 rounded-2xl mb-6">
         Escanear EPP
       </button>
-      {!modelProgress.ready && (
+      {!modelProgress.ready ? (
         <p className="text-center text-[#8A8A98] text-xs -mt-4 mb-6">
           {modelProgress.stage === 'gpu'
             ? `Preparando modelos en el teléfono… ${modelProgress.warmed || 0}/${modelProgress.total}`
@@ -62,7 +62,9 @@ export default function Home({ user, onNavigate }) {
               ? `Preparando modelos… ${modelProgress.loaded}/${modelProgress.total}`
               : 'Preparando modelos…')}
         </p>
-      )}
+      ) : (!modelProgress.handsReady && modelProgress.models?.guantes) ? (
+        <p className="text-center text-[#8A8A98] text-xs -mt-4 mb-6">Listo para escanear. Preparando guantes…</p>
+      ) : null}
 
       <div>
         <div className="flex justify-between mb-2 px-1">

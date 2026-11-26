@@ -11,7 +11,7 @@ export const MODELS = {
   casco: './models/CipT7kvYx/',
   lentes: './models/JpOoTGgap/',
   chaleco: './models/Lmhs4iwPb/',
-  guantes: '',
+  guantes: './models/-r8T3LHey/',
 }
 
 // Una sola lectura no cambia el estado: ventana ~1.3 s y banda de histéresis.

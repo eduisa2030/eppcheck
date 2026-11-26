@@ -1,4 +1,4 @@
-import { ITEMS } from './models'
+import { BODY_ITEMS, ITEMS } from './models'
 import { MODELS } from './config'
 import { getModelUrls } from './api'
 import { loadTM } from './tm'
@@ -7,10 +7,11 @@ const memory = new Map()
 const prefetched = new Map()
 let bootPromise = null
 let preloadPromise = null
+let bodyReadyWait = null
 let engineCompileOnly = false
 let resolved = null
 let startedAt = 0
-let progress = { loaded: 0, total: 0, ready: false, models: {} }
+let progress = { loaded: 0, total: 0, ready: false, handsReady: false, models: {} }
 const listeners = new Set()
 
 function emit() {
@@ -253,6 +254,39 @@ function abortModelFetches(url) {
   for (const weightUrl of window.__eppWeights?.[url] || []) abortUrl(weightUrl)
 }
 
+function getBodyReadyWait() {
+  if (!bodyReadyWait) {
+    let resolve
+    let reject
+    const promise = new Promise((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    bodyReadyWait = { promise, resolve, reject }
+  }
+  return bodyReadyWait
+}
+
+function announceBodyReady(wanted) {
+  if (progress.ready) return
+  const needed = BODY_ITEMS.filter(id => wanted.has(id))
+  if (needed.some(id => !getModel(id))) return
+  const handsPending = wanted.has('guantes') && !getModel('guantes')
+  progress = {
+    ...progress,
+    ready: true,
+    handsReady: !handsPending,
+    stage: handsPending ? 'gpu' : 'listo',
+  }
+  emit()
+  console.info('[epp-model]', JSON.stringify({
+    phase: 'cuerpo-listo',
+    at: Math.round(performance.now() - startedAt),
+    handsPending,
+  }))
+  getBodyReadyWait().resolve(resolved)
+}
+
 async function runPreload() {
   startedAt = performance.now()
   const initial = configUrls()
@@ -292,8 +326,15 @@ async function runPreload() {
   const tm = window.tmImage
 
   const bundles = new Map()
-  if (misses.length) {
-    await Promise.all(misses.map(async ({ id, url }) => {
+  const bodyMisses = misses.filter(({ id }) => BODY_ITEMS.includes(id))
+  const handMisses = misses.filter(({ id }) => !BODY_ITEMS.includes(id))
+  const handDownloads = Promise.all(handMisses.map(async ({ id, url }) => {
+    const bundle = await prefetch(url)
+    bundles.set(id, bundle)
+    mark(id, 'descargado', { source: 'network' })
+  }))
+  if (bodyMisses.length) {
+    await Promise.all(bodyMisses.map(async ({ id, url }) => {
       const bundle = await prefetch(url)
       bundles.set(id, bundle)
       mark(id, 'descargado', { source: 'network' })
@@ -304,8 +345,7 @@ async function runPreload() {
   console.info('[epp-model]', JSON.stringify({ phase: 'bytes', at: Math.round(performance.now() - startedAt) }))
 
   const built = []
-  for (const [id, url] of wanted) {
-    if (!url) continue
+  async function buildOne(id, url) {
     mark(id, 'preparando', { source: hits.some(hit => hit.id === id) ? 'idb' : 'network' })
     const record = hits.find(hit => hit.id === id && hit.url === url)?.record
     let model
@@ -341,13 +381,35 @@ async function runPreload() {
     mark(id, source === 'idb' ? 'cache' : 'listo', { source })
   }
 
-  progress = { ...progress, ready: true, stage: 'listo' }
+  for (const [id, url] of wanted) {
+    if (!url || !BODY_ITEMS.includes(id)) continue
+    await buildOne(id, url)
+    announceBodyReady(wanted)
+  }
+  announceBodyReady(wanted)
+
+  try {
+    await handDownloads
+    for (const [id, url] of wanted) {
+      if (!url || BODY_ITEMS.includes(id)) continue
+      await buildOne(id, url)
+    }
+  } catch (err) {
+    console.warn('[epp-model] no se pudo preparar el modelo de guantes', err)
+    if (wanted.has('guantes')) mark('guantes', 'error')
+    progress = { ...progress, handsReady: false }
+    emit()
+  }
+
+  const handsReady = !wanted.has('guantes') || Boolean(getModel('guantes'))
+  progress = { ...progress, ready: true, handsReady, stage: 'listo' }
   emit()
   console.info('[epp-model]', JSON.stringify({
     phase: 'listos',
     at: Math.round(performance.now() - startedAt),
     models: progress.models,
   }))
+  getBodyReadyWait().resolve(resolved)
 
   // Después de listos, para no competir con la descarga ni la GPU.
   resolveSheet(initial).then(sheet => {
@@ -370,12 +432,18 @@ async function runPreload() {
 }
 
 /** Empieza las tres descargas juntas en cuanto arranca la app. No vuelve a bajar los mismos URL. */
+/** Resuelve cuando los modelos de cuerpo (casco, lentes, chaleco) ya están listos.
+ *  El de guantes puede seguir calentándose en segundo plano. */
 export function preloadModels() {
+  const wait = getBodyReadyWait()
   if (!preloadPromise) {
     preloadPromise = runPreload().catch(err => {
       preloadPromise = null
+      const pending = bodyReadyWait
+      bodyReadyWait = null
+      pending?.reject(err)
       throw err
     })
   }
-  return preloadPromise
+  return wait.promise
 }

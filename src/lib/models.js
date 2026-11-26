@@ -6,4 +6,6 @@ export const ITEM_CLASSES = {
   guantes: { bien: 'Bien puestos', mal: 'Mal puestos', sin: 'Sin guantes' },
 }
 
-export const ITEMS = ['casco', 'lentes', 'chaleco', 'guantes']
+export const BODY_ITEMS = ['casco', 'lentes', 'chaleco']
+export const HAND_ITEMS = ['guantes']
+export const ITEMS = [...BODY_ITEMS, ...HAND_ITEMS]
